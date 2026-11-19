@@ -35,6 +35,7 @@ import { DatePickerField } from '@/components/ui/DatePickerField';
 import { TimePickerField } from '@/components/ui/TimePickerField';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useAgendaPush } from '@/hooks/useAgendaPush';
 import { useTheme } from '@/context/ThemeContext';
 import {
   createPlannerEvent,
@@ -1074,6 +1075,12 @@ export function KanbanPlannerView({
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, [isOwnerEffective, googleStatus?.configured, googleStatus?.connected, queryClient]);
+
+  // Aviso instantâneo: o servidor manda um sinal quando o Google informa uma mudança nos eventos.
+  useAgendaPush(
+    !!isOwnerEffective && !!googleStatus?.configured && !!googleStatus.connected,
+    () => queryClient.invalidateQueries({ queryKey: ['planner-events'] })
+  );
 
   const handleGoogleSyncClick = async () => {
     if (!isOwnerEffective) {

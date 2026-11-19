@@ -131,7 +131,7 @@ export async function handleGoogleOAuthCallback(userId: string, code: string) {
   await saveGoogleTokens(userId, tokens, existing?.refreshToken);
 }
 
-async function getValidAccessToken(userId: string): Promise<string> {
+export async function getValidAccessToken(userId: string): Promise<string> {
   const conn = await prisma.googleCalendarConnection.findUnique({ where: { userId } });
   if (!conn) throw new Error('Google Calendar não conectado');
 
@@ -149,6 +149,7 @@ async function getValidAccessToken(userId: string): Promise<string> {
     // Remove para a tela voltar a mostrar "Conectar" em vez de parecer conectada e não sincronizar.
     if (/bad request|invalid_grant|expired|revoked/i.test(msg)) {
       await prisma.googleCalendarConnection.deleteMany({ where: { userId } });
+      await prisma.googleCalendarWatch.deleteMany({ where: { userId } });
       throw new Error('Acesso ao Google Agenda venceu. Conecte novamente.');
     }
     throw e;
@@ -167,7 +168,7 @@ type GoogleEvent = {
   end?: { dateTime?: string; date?: string; timeZone?: string };
 };
 
-type GoogleCalendarListEntry = {
+export type GoogleCalendarListEntry = {
   id?: string;
   summary?: string;
   primary?: boolean;
@@ -292,7 +293,7 @@ function stableGoogleEventId(calendarId: string, eventId: string, isPrimary: boo
   return `${calendarId}::${eventId}`;
 }
 
-async function listGoogleCalendars(accessToken: string): Promise<GoogleCalendarListEntry[]> {
+export async function listGoogleCalendars(accessToken: string): Promise<GoogleCalendarListEntry[]> {
   const calendars: GoogleCalendarListEntry[] = [];
   let pageToken: string | undefined;
   do {
@@ -476,7 +477,7 @@ function envInt(name: string, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
-function autoSyncWindow(): { from: Date; to: Date } {
+export function autoSyncWindow(): { from: Date; to: Date } {
   const from = new Date();
   from.setHours(0, 0, 0, 0);
   from.setDate(from.getDate() - 14);

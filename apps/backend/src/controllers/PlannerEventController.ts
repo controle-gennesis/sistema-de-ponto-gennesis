@@ -15,6 +15,7 @@ import {
   isGoogleCalendarConnected,
   syncGoogleCalendarEvents,
 } from '../services/googleCalendarSync';
+import { ensureWatchesForUser, stopWatchesForUser } from '../services/googleCalendarWatch';
 
 const chatUploadService = new ChatService();
 
@@ -681,6 +682,10 @@ export class PlannerEventController {
       if (!payload?.userId) return fail('invalid_state');
 
       await handleGoogleOAuthCallback(payload.userId, code);
+      // Liga o aviso instantâneo do Google para esta conta (em segundo plano; se falhar, a sincronização periódica cobre).
+      void ensureWatchesForUser(payload.userId).catch((e) =>
+        console.warn('[google-watch] ao conectar:', e instanceof Error ? e.message : e)
+      );
 
       const app = appReturnUrl(payload.returnTo, { googleCalendar: 'connected' });
       if (app) return this.appReturnPage(res, app);
@@ -730,6 +735,7 @@ export class PlannerEventController {
 
   async googleDisconnect(req: AuthRequest, res: Response, next: NextFunction) {
     try {
+      await stopWatchesForUser(req.user!.id);
       await disconnectGoogleCalendar(req.user!.id);
       res.json({ success: true });
     } catch (error) {

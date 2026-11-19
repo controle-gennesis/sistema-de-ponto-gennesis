@@ -121,6 +121,7 @@ model User {
   plannerAgendaSharesReceived               PlannerAgendaShare[]                 @relation("PlannerAgendaShareSharedWith")
   plannerAgendaSharesCreated                PlannerAgendaShare[]                 @relation("PlannerAgendaShareCreatedBy")
   googleCalendarConnection                  GoogleCalendarConnection?            @relation("GoogleCalendarConnectionUser")
+  googleCalendarWatches                     GoogleCalendarWatch[]
   demandSheetApprovalsCreated               DemandSheetApproval[]                @relation("DemandSheetApprovalCreator")
   demandSheetApprovalsAsSolicitante         DemandSheetApproval[]                @relation("DemandSheetApprovalSolicitante")
   demandSheetApprovalsManagerApproved       DemandSheetApproval[]                @relation("DemandSheetApprovalManager")
@@ -3928,6 +3929,23 @@ model GoogleCalendarConnection {
   user User @relation("GoogleCalendarConnectionUser", fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("google_calendar_connections")
+}
+
+/// Canal de aviso do Google Agenda (push): o Google chama o servidor quando um evento muda.
+model GoogleCalendarWatch {
+  id         String   @id @default(cuid())
+  userId     String
+  calendarId String
+  channelId  String   @unique
+  resourceId String
+  expiration DateTime
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiration])
+  @@map("google_calendar_watches")
 }
 
 model KanbanCardMember {

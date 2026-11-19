@@ -1,12 +1,19 @@
 import { Router, Response, NextFunction } from 'express';
 import { PlannerEventController } from '../controllers/PlannerEventController';
 import { authenticate, AuthRequest } from '../middleware/auth';
+import { handleGoogleCalendarWebhook } from '../services/googleCalendarWatch';
 
 const router = Router();
 const controller = new PlannerEventController();
 
 // Callback do Google não usa Bearer token (vem do redirect do navegador).
 router.get('/google/callback', (req, res, next) => controller.googleCallback(req as any, res, next));
+
+// Aviso do Google Agenda (push): chamado pelo próprio Google, sem Bearer token. A autenticidade
+// é conferida pela senha do canal (cabeçalho X-Goog-Channel-Token).
+router.post('/google/webhook', (req, res, next) =>
+  handleGoogleCalendarWebhook(req, res).catch(next)
+);
 
 router.use(authenticate);
 
