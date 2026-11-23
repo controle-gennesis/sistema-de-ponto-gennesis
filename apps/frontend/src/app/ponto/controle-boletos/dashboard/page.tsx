@@ -85,8 +85,15 @@ type Dashboard = {
   byMonthPolo: Array<{ key: string; polos: Record<string, { value: number; count: number }> }>;
 };
 
-type Filters = { polo: string; costCenter: string; manager: string; dueFrom: string; dueTo: string };
-const EMPTY_FILTERS: Filters = { polo: '', costCenter: '', manager: '', dueFrom: '', dueTo: '' };
+type Filters = { polo: string; costCenter: string; manager: string; status: string; dueFrom: string; dueTo: string };
+const EMPTY_FILTERS: Filters = { polo: '', costCenter: '', manager: '', status: '', dueFrom: '', dueTo: '' };
+
+/** Situação do boleto (valor enviado ao servidor + rótulo na tela). */
+const STATUS_OPTIONS = [
+  { value: 'PAGO', label: 'Pago' },
+  { value: 'A_VENCER', label: 'À vencer' },
+  { value: 'VENCIDO', label: 'Vencido' },
+];
 
 const CHART_PALETTE = ['#b91c1c', '#0f766e', '#1e40af', '#c2410c', '#0891b2', '#a16207', '#be185d', '#334155'];
 const STATUS_COLORS = { pago: '#059669', aVencer: '#d97706', vencido: '#dc2626' };
@@ -892,7 +899,7 @@ function DashboardBoletosPage() {
           <Card className={cadastroListClasses.card}>
             <CardHeader className={cadastroListClasses.cardHeader}>
               <div className={cadastroListClasses.cardHeaderRow}>
-                <SectionTitle icon={ListFilter} title="Filtros" subtitle="Recorte os indicadores por polo, centro de custo, gestor e período de vencimento" />
+                <SectionTitle icon={ListFilter} title="Filtros" subtitle="Recorte os indicadores por polo, centro de custo, gestor, situação e período de vencimento" />
                 {filtersActive ? (
                   <button
                     type="button"
@@ -906,7 +913,7 @@ function DashboardBoletosPage() {
               </div>
             </CardHeader>
             <CardContent className={cadastroListClasses.cardContent}>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
                 <FilterField label="Polo">
                   <StringSingleSelectDropdown value={filters.polo} onChange={setFilter('polo')} options={options?.polos ?? []} placeholder="Todos" emptyOptionLabel="Todos" matchTriggerWidth />
                 </FilterField>
@@ -915,6 +922,9 @@ function DashboardBoletosPage() {
                 </FilterField>
                 <FilterField label="Gestor">
                   <StringSingleSelectDropdown value={filters.manager} onChange={setFilter('manager')} options={options?.managers ?? []} placeholder="Todos" emptyOptionLabel="Todos" matchTriggerWidth />
+                </FilterField>
+                <FilterField label="Situação">
+                  <StringSingleSelectDropdown value={filters.status} onChange={setFilter('status')} options={STATUS_OPTIONS} placeholder="Todas" emptyOptionLabel="Todas" matchTriggerWidth />
                 </FilterField>
                 <FilterField label="Vencimento de">
                   <DatePickerField value={filters.dueFrom} onChange={setFilter('dueFrom')} placeholder="dd/mm/aaaa" aria-label="Vencimento a partir de" />

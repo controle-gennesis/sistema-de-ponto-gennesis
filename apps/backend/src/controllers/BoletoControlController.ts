@@ -252,14 +252,15 @@ function paymentTypeOf(condition: string | null): (typeof PAYMENT_TYPES)[number]
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 export class BoletoControlController {
-  /** Indicadores para o dashboard (mesmos filtros da lista, exceto busca livre e status). */
+  /** Indicadores para o dashboard (mesmos filtros da lista; inclui a situação: pago, à vencer ou vencido). */
   async dashboard(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const f = readFilters(req.query);
       const today = todayBrasilia();
       const managers = await loadManagerMap();
+      const statusFilter = statusWhere(f.status, today);
       const rows = await prisma.boletoControlEntry.findMany({
-        where: { AND: baseWhere(f, managers) },
+        where: { AND: [...baseWhere(f, managers), ...(statusFilter ? [statusFilter] : [])] },
         select: {
           id: true,
           polo: true,
