@@ -705,12 +705,14 @@ export class BoletoControlController {
         technicalConfirmedByName: e.technicalConfirmed ? 'Importado da planilha' : null,
       });
 
-      // Ordem da planilha: a lista mostra o cadastrado mais recente primeiro, então a 1ª linha da
-      // planilha recebe o horário mais novo do lote e as seguintes vão ficando 1 ms mais antigas.
+      // Ordem da planilha: o que foi adicionado por último fica EMBAIXO dela, e a lista mostra o mais
+      // recente primeiro. Então a ÚLTIMA linha da planilha recebe o horário mais novo do lote e as
+      // anteriores vão ficando 1 ms mais antigas (leitura de baixo para cima).
       // O que for cadastrado depois (à mão ou em outro importe) fica acima de tudo.
       const orderNow = Date.now();
+      const lastIdx = parsed.entries.length - 1;
       const orderAt = new Map<string, Date>(
-        parsed.entries.map((e, i) => [e.importKey, new Date(orderNow - i)] as [string, Date])
+        parsed.entries.map((e, i) => [e.importKey, new Date(orderNow - (lastIdx - i))] as [string, Date])
       );
 
       const fresh = parsed.entries.filter((e) => !existingKeys.has(e.importKey));
