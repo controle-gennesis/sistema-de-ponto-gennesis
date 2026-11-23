@@ -20,6 +20,8 @@ type Props = {
   enabled: boolean;
 };
 
+const EMPTY_REQUESTERS: MissingPhoneRequester[] = [];
+
 function isValidBrPhone(value: string): boolean {
   const digits = onlyDigits(value);
   return digits.length === 10 || digits.length === 11;
@@ -31,7 +33,7 @@ export function FuelMissingPhonesModal({ enabled }: Props) {
   const [dismissedThisVisit, setDismissedThisVisit] = useState(false);
   const [phones, setPhones] = useState<Record<string, string>>({});
 
-  const { data: requesters = [], isLoading } = useQuery({
+  const { data: requestersData, isLoading } = useQuery({
     queryKey: ['fuel-requesters-missing-phone'],
     queryFn: async () => {
       const res = await api.get('/fuel-refuel-requests/requesters-missing-phone');
@@ -41,6 +43,10 @@ export function FuelMissingPhonesModal({ enabled }: Props) {
     staleTime: 0,
     refetchOnMount: 'always',
   });
+
+  // Lista estável: um `= []` no desestruturamento criaria uma nova a cada renderização e
+  // faria o efeito abaixo rodar sem parar.
+  const requesters = requestersData ?? EMPTY_REQUESTERS;
 
   useEffect(() => {
     if (!enabled || dismissedThisVisit || isLoading) return;
@@ -53,6 +59,12 @@ export function FuelMissingPhonesModal({ enabled }: Props) {
       const next: Record<string, string> = {};
       for (const row of requesters) {
         next[row.userId] = prev[row.userId] || '';
+      }
+      // Mesmo conteúdo: devolve o estado anterior para não provocar nova renderização.
+      const prevKeys = Object.keys(prev);
+      const nextKeys = Object.keys(next);
+      if (prevKeys.length === nextKeys.length && nextKeys.every((k) => prev[k] === next[k])) {
+        return prev;
       }
       return next;
     });
