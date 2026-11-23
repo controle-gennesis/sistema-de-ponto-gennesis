@@ -56,6 +56,9 @@ import { searchOcSuppliers } from '@/components/oc/searchOcSuppliers';
 import type { OcSupplierOption } from '@/components/oc/OcPurchaseOrderFormFields';
 
 /** Lista sem repetir nomes; mantém o valor atual (boleto antigo) mesmo que não esteja na lista, para não apagá-lo. */
+/** Polos que podem ser escolhidos ao cadastrar ou editar um boleto. */
+const POLOS_BOLETO = ['POLO DF', 'POLO GO', 'CONFEA'] as const;
+
 function comValorAtual(lista: string[], atual: string): string[] {
   const valor = (atual ?? '').trim();
   const vistos = new Set<string>();
@@ -951,7 +954,7 @@ function ControleBoletosPage() {
               <StringSingleSelectDropdown
                 value={form.polo}
                 onChange={(v) => set('polo', v)}
-                options={comValorAtual(options?.polos ?? [], form.polo)}
+                options={comValorAtual([...POLOS_BOLETO], form.polo)}
                 allowEmpty
                 emptyOptionLabel="Nenhum"
                 placeholder="Selecione o polo..."
