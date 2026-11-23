@@ -477,6 +477,10 @@ router.patch('/:id/status', async (req: AuthRequest, res: Response, next: NextFu
       // Correção: aprovador de RM ou quem tem acesso ao mapa de cotação (Compras).
       await assertUserCanSendRmToCorrection(req.user.id, req.user.isAdmin);
     } else if (status === 'CANCELLED') {
+      // Só antes da aprovação do gestor (Pendente) ou em correção — vale para todos, inclusive o administrador.
+      if (existing.status !== 'PENDING' && existing.status !== 'IN_REVIEW') {
+        throw createError('Só é possível cancelar a RM antes da aprovação do gestor ou em correção.', 400);
+      }
       const isCreator = existing.requestedBy === req.user.id;
       if (!isCreator && !req.user.isAdmin) {
         await assertUserCanApproveMaterialRequests(req.user.id, req.user.isAdmin);

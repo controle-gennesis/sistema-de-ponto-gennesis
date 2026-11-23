@@ -1894,9 +1894,9 @@ export class MaterialRequestService {
     if (request.status === 'CANCELLED') {
       throw new Error('A requisição já está cancelada');
     }
-    // Administrador cancela em qualquer fase (inclusive atendida); o solicitante, não.
-    if (request.status === 'FULFILLED' && !isAdmin) {
-      throw new Error('Não é possível cancelar uma requisição já atendida ou cancelada');
+    // Só antes da aprovação do gestor (Pendente) ou em correção — vale para todos, inclusive o administrador.
+    if (request.status !== 'PENDING' && request.status !== 'IN_REVIEW') {
+      throw new Error('Só é possível cancelar a RM antes da aprovação do gestor ou em correção.');
     }
     await assertRmSemOcAtiva(request.id);
 

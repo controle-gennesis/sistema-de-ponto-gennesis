@@ -5,6 +5,7 @@ import React, { useState, useEffect, useMemo, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
+  ExternalLink,
   ShoppingCart,
   Plus,
   X,
@@ -89,7 +90,6 @@ import { RmLinkedOcDocuments } from '@/components/material-requests/RmLinkedOcDo
 import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { getRmItemCoverageCounts, canUserCancelRmItem, isRmItemCancelled } from '@/lib/rmProcurementCoverage';
 import { RmItemSituationCell } from '@/components/material-requests/RmItemSituationCell';
-import { formatRmItemProductKinds } from '@/lib/rmItemProductKinds';
 import type { MaterialRequest } from '@/app/ponto/gerenciar-materiais/_lib/types';
 import { isMaterialRequestEffectivelyCancelled } from '@/app/ponto/gerenciar-materiais/_lib/search';
 import {
@@ -1154,6 +1154,21 @@ function SolicitarMateriaisPage() {
     },
     enabled: !!detailViewId && !!userData?.data?.id
   });
+
+  // Orçamento de onde saiu a FD da RM (botão "Ver orçamento" nos detalhes).
+  const { data: detailFdAssoc } = useQuery({
+    queryKey: ['fd-association-by-rm', detailViewId],
+    queryFn: async () => {
+      const res = await api.get(`/demand-sheet-approvals/by-material-request/${detailViewId}`);
+      return (res.data?.data ?? null) as { orcamentoId?: string | null; contratoId?: string | null } | null;
+    },
+    enabled: !!detailViewId && !!userData?.data?.id,
+    staleTime: 60_000,
+  });
+  const detailOrcamentoHref =
+    detailFdAssoc?.orcamentoId && detailFdAssoc?.contratoId
+      ? `/ponto/orcamentos/${detailFdAssoc.contratoId}/${detailFdAssoc.orcamentoId}`
+      : null;
 
   // Histórico de correções da RM (quem, quando, material e/ou quantidade).
   const { data: detailCorrecoesData } = useQuery({
@@ -2430,9 +2445,6 @@ function SolicitarMateriaisPage() {
                           <th className="w-[7%] min-w-[4.5rem] px-2 sm:px-3 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
                             Itens
                           </th>
-                          <th className="w-[9%] min-w-[5.5rem] px-2 sm:px-3 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
-                            Tipo
-                          </th>
                           <th className="min-w-[8rem] px-2 sm:px-3 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
                             OC
                           </th>
@@ -2490,7 +2502,6 @@ function SolicitarMateriaisPage() {
                               itemCancelled != null &&
                               itemCancelled > 0 &&
                               (itemPending == null || itemPending === 0);
-                            const tipoLabel = formatRmItemProductKinds(request.itemProductKinds);
                             const solicitanteNome = String(
                               (request as { requester?: { name?: string } }).requester?.name ||
                                 ((request as { requestedBy?: unknown }).requestedBy &&
@@ -2530,14 +2541,15 @@ function SolicitarMateriaisPage() {
                                   {rmContractName(request as Parameters<typeof rmContractName>[0])}
                                 </span>
                               </td>
+                              {/* OS e obra: quebram a linha (como o contrato) e mostram o texto inteiro. */}
                               <td
-                                className="px-3 sm:px-6 py-3 text-center text-sm text-gray-700 dark:text-gray-300 max-w-[120px] truncate"
+                                className="px-3 sm:px-6 py-3 text-center text-sm text-gray-700 dark:text-gray-300 min-w-[110px] max-w-[180px] whitespace-normal break-words"
                                 title={rmOsLine(request as Parameters<typeof rmOsLine>[0])}
                               >
                                 {rmOsLine(request as Parameters<typeof rmOsLine>[0])}
                               </td>
                               <td
-                                className="px-3 sm:px-6 py-3 text-center text-sm text-gray-700 dark:text-gray-300 max-w-[120px] truncate"
+                                className="px-3 sm:px-6 py-3 text-center text-sm text-gray-700 dark:text-gray-300 min-w-[110px] max-w-[180px] whitespace-normal break-words"
                                 title={String(request.obra || '')}
                               >
                                 {request.obra ? String(request.obra) : '—'}
@@ -2586,20 +2598,6 @@ function SolicitarMateriaisPage() {
                                   </div>
                                 )}
                               </td>
-                              <td
-                                className="w-[9%] min-w-[5.5rem] px-2 sm:px-3 py-3 text-center align-middle"
-                                title={tipoLabel === '—' ? undefined : tipoLabel}
-                              >
-                                {tipoLabel === '—' ? (
-                                  <span className="text-xs sm:text-sm text-gray-400 dark:text-gray-500">
-                                    —
-                                  </span>
-                                ) : (
-                                  <span className="text-xs sm:text-sm font-medium text-gray-800 dark:text-gray-200 whitespace-nowrap">
-                                    {tipoLabel}
-                                  </span>
-                                )}
-                              </td>
                               <td className={`${cadastroListClasses.tdMono} min-w-[8rem] text-center !pl-2 sm:!pl-3 !pr-1 py-3 align-middle`}>
                                 {ocRows.length === 0 ? (
                                   <span className="text-xs sm:text-sm text-gray-400 dark:text-gray-500">—</span>
@@ -2622,15 +2620,31 @@ function SolicitarMateriaisPage() {
                                   <span className="text-xs sm:text-sm text-gray-400 dark:text-gray-500">—</span>
                                 ) : (
                                   <div className="flex flex-col items-center justify-center gap-1">
-                                    {ocRows.map((row) => (
-                                      <span
-                                        key={row.key}
-                                        className={row.statusBadgeClassName}
-                                        title={row.statusTitle ?? row.status}
-                                      >
-                                        {row.status}
-                                      </span>
-                                    ))}
+                                    {ocRows.map((row) =>
+                                      row.totvsIdMov && row.status === 'Enviada ao TOTVS' ? (
+                                        <span
+                                          key={row.key}
+                                          className={row.statusBadgeClassName}
+                                          title={row.statusTitle ?? row.status}
+                                        >
+                                          {row.status} · IdMov {row.totvsIdMov}
+                                        </span>
+                                      ) : (
+                                        <span key={row.key} className="inline-flex flex-col items-center gap-0.5">
+                                          <span
+                                            className={row.statusBadgeClassName}
+                                            title={row.statusTitle ?? row.status}
+                                          >
+                                            {row.status}
+                                          </span>
+                                          {row.totvsIdMov ? (
+                                            <span className="text-[11px] tabular-nums text-gray-500 dark:text-gray-400">
+                                              IdMov {row.totvsIdMov}
+                                            </span>
+                                          ) : null}
+                                        </span>
+                                      )
+                                    )}
                                   </div>
                                 )}
                               </td>
@@ -2683,10 +2697,14 @@ function SolicitarMateriaisPage() {
                           },
                           icon: <Eye className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
                         },
-                        // Administrador cancela a RM em qualquer fase (fora da correção, só ele).
-                        ...(isAdministrator &&
-                        rowForActionMenu.status !== 'IN_REVIEW' &&
-                        rowForActionMenu.status !== 'CANCELLED'
+                        // Cancelar RM só antes da aprovação do gestor (Pendente) ou em correção (abaixo).
+                        ...(rowForActionMenu.status === 'PENDING' &&
+                        canUserCancelMaterialRequest(
+                          rowForActionMenu as MaterialRequest,
+                          userId,
+                          isAdministrator,
+                          { assumeCurrentUserIsOwner: true }
+                        )
                           ? [
                               {
                                 label: 'Cancelar RM',
@@ -3394,7 +3412,46 @@ function SolicitarMateriaisPage() {
                       });
                     }
                     if (d.demandSheet) {
-                      infoRows.push({ label: 'Ficha de Demanda', value: String(d.demandSheet) });
+                      infoRows.push({
+                        label: 'Ficha de Demanda',
+                        value: (
+                          <span className="inline-flex flex-wrap items-center justify-end gap-2">
+                            <span>{String(d.demandSheet)}</span>
+                            {detailOrcamentoHref && detailFdAssoc && detailViewId === detailRequestId ? (
+                              <a
+                                href={detailOrcamentoHref}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 rounded-lg border border-blue-300 bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100 dark:border-blue-600 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50"
+                              >
+                                <ExternalLink className="h-3.5 w-3.5" />
+                                Ver orçamento
+                              </a>
+                            ) : null}
+                          </span>
+                        )
+                      });
+                    }
+                    {
+                      // IdMov do TOTVS das OCs desta RM já enviadas ao RM.
+                      const idMovs = (
+                        (Array.isArray(d.purchaseOrders) ? d.purchaseOrders : []) as Array<{
+                          orderNumber?: string | null;
+                          totvsIdMov?: number | null;
+                          status?: string;
+                        }>
+                      ).filter((po) => po.totvsIdMov && po.status !== 'CANCELLED' && po.status !== 'REJECTED');
+                      if (idMovs.length > 0) {
+                        infoRows.push({
+                          label: 'IdMov TOTVS',
+                          value: idMovs
+                            .map((po) => {
+                              const oc = po.orderNumber ? formatOcListDisplayId(String(po.orderNumber)) : '';
+                              return oc ? `${po.totvsIdMov} (OC ${oc})` : String(po.totvsIdMov);
+                            })
+                            .join(' · ')
+                        });
+                      }
                     }
                     if (d.description?.trim()) {
                       infoRows.push({

@@ -4,6 +4,7 @@ import React, { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, Loader2, X } from 'lucide-react';
 import api from '@/lib/api';
+import { etapaFluigDaOc } from '@/components/oc/ocStatusLabels';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 import type { FdInsumoLine } from '@/components/engenharia/FdPedidoMaterialModal';
 import { HistoricoCorrecoes, type CorrecaoRegistro } from '@/components/engenharia/HistoricoCorrecoes';
@@ -88,6 +89,11 @@ export const OC_STATUS: Record<string, string> = {
   REJECTED: 'Reprovada',
   CANCELLED: 'Cancelada',
 };
+
+/** Onde a OC está: etapa do Fluig (G3/G4) quando já está no TOTVS; senão o status do Conecta. */
+export function statusOcResumo(oc: Pick<OcResumo, 'status' | 'fluigFase'>): string {
+  return etapaFluigDaOc(oc) ?? OC_STATUS[oc.status] ?? oc.status;
+}
 
 const ALERTA_LABEL: Record<string, string> = {
   '1:N': 'vários materiais',
@@ -289,7 +295,7 @@ export function FdPedidosResumoModal({ isOpen, onClose, fdApprovalId, insumos }:
                                     <p key={oc.orderNumber}>
                                       <span className="font-medium text-gray-900 dark:text-gray-100">{oc.orderNumber}</span>{' '}
                                       <span className="text-[11px] text-gray-500 dark:text-gray-400">
-                                        · {OC_STATUS[oc.status] ?? oc.status}
+                                        · {statusOcResumo(oc)}
                                       </span>
                                     </p>
                                   ))

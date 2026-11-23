@@ -16,6 +16,7 @@ import { Modal } from '@/components/ui/Modal';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { downloadUploadFile } from '@/lib/downloadUploadFile';
+import { diluirDescontoOc } from '@/lib/diluirDescontoOc';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -69,7 +70,7 @@ import {
 import { buildSupplierPaymentPrefill } from '@/lib/supplierPaymentPrefill';
 import {
   FdPedidosResumoModal,
-  OC_STATUS,
+  statusOcResumo,
   RM_STATUS,
   fmtMoeda,
   ocsEnviadasTotvs,
@@ -1651,7 +1652,7 @@ export default function MapaCotacaoPage() {
                 // Só OC enviada ao TOTVS; antes disso o item segue "Aguardando OC".
                 ocs: ocsEnviadasTotvs(m.ocs).map((oc) => ({
                   orderNumber: oc.orderNumber,
-                  status: OC_STATUS[oc.status] ?? oc.status,
+                  status: statusOcResumo(oc),
                   totvsIdMov: oc.totvsIdMov,
                   valorPago:
                     oc.pago && oc.valorPago != null
@@ -2887,6 +2888,22 @@ export default function MapaCotacaoPage() {
           const payType = draft.paymentType ?? OC_TYPE_AVISTA;
           const paymentConditionValue =
             draft.paymentCondition ?? paymentConditionDefault(payType);
+          // OC TOTVS com desconto: o desconto vai diluído nos preços (mesma conta do envio) — mostra original × com desconto.
+          const descontoOc = parseMapUnitPrice(discountBySupplier[sid] ?? '') ?? 0;
+          const diluicaoOc =
+            destinoOcDoFornecedor(draft.destino) === 'TOTVS' && descontoOc > 0
+              ? diluirDescontoOc(
+                  itemsWon.map((it) => ({
+                    id: it.id,
+                    quantidade: ocItemQtyByItemId[it.id] ?? Number(it.quantity),
+                    precoUnitario: parseMapUnitPrice(unitPriceBySupplierItem[`${sid}:${it.id}`] ?? '') ?? 0,
+                  })),
+                  descontoOc
+                )
+              : null;
+          const precoComDescontoPorItem = new Map(
+            diluicaoOc?.aplicado ? diluicaoOc.items.map((it) => [it.id, it.precoUnitario] as const) : []
+          );
           const closeOcModal = () => {
             if (isGenerating) return;
             setOcModalSupplierId(null);
@@ -3072,6 +3089,9 @@ export default function MapaCotacaoPage() {
                           <th className={cadastroListClasses.thCenter}>Unidade</th>
                           <th className={cadastroListClasses.thCenter}>Qtd. OC</th>
                           <th className={cadastroListClasses.thNumeric}>Valor unit.</th>
+                          {precoComDescontoPorItem.size > 0 ? (
+                            <th className={`${cadastroListClasses.thNumeric} whitespace-nowrap`}>Valor c/ desc.</th>
+                          ) : null}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
@@ -3132,12 +3152,32 @@ export default function MapaCotacaoPage() {
                               >
                                 {unitParsed == null ? '—' : formatMapUnitPriceBR(unitParsed)}
                               </td>
+                              {precoComDescontoPorItem.size > 0 ? (
+                                <td
+                                  className={`${cadastroListClasses.tdNumeric} tabular-nums font-medium text-emerald-700 dark:text-emerald-300`}
+                                >
+                                  {precoComDescontoPorItem.has(item.id)
+                                    ? `R$ ${precoComDescontoPorItem
+                                        .get(item.id)!
+                                        .toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`
+                                    : '—'}
+                                </td>
+                              ) : null}
                             </tr>
                           );
                         })}
                       </tbody>
                     </table>
                   </div>
+                  {diluicaoOc?.aplicado ? (
+                    <p className="mt-2 text-xs text-gray-600 dark:text-gray-300">
+                      No TOTVS o desconto de <strong>{formatCurrencyBR(diluicaoOc.desconto)}</strong> vai diluído nos
+                      preços dos itens (o frete não muda). Itens: original{' '}
+                      <strong>{formatCurrencyBR(diluicaoOc.totalOriginal)}</strong> → com desconto{' '}
+                      <strong>{formatCurrencyBR(diluicaoOc.totalComDesconto)}</strong>. O valor original e o com
+                      desconto ficam registrados no histórico da OC no TOTVS.
+                    </p>
+                  ) : null}
                 </div>
 
                 <OcFilialField

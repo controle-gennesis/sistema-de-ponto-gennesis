@@ -1431,6 +1431,10 @@ export function FluigSolicitacoesPage({
     const s = rawStatus.trim();
 
     if (datasetId === 'DataSet_G3FollowUp') {
+      // Às vezes o espelho traz só o número da atividade do G3 (sem nome): 4 = Aprovação da Diretoria.
+      if (/^(Etapa\s*)?4$/i.test(s)) {
+        return { key: 'G3_APROVACAO_DIRETORIA', label: 'Aprovação da Diretoria' };
+      }
       if (/Etapa\s*108\b/i.test(s)) {
         return { key: 'G3_ETAPA_108_ANALISE_CONTROLADORIA', label: 'Análise Controladoria' };
       }
@@ -1450,7 +1454,7 @@ export function FluigSolicitacoesPage({
       if (/setor\s+tecnico/.test(g3Norm)) {
         return { key: 'G3_APROVACAO_SETOR_TECNICO', label: 'Aprovação do Setor Técnico' };
       }
-      if (/diretoria/.test(g3Norm)) {
+      if (/diretoria|\bdir\b\.?/.test(g3Norm)) {
         return { key: 'G3_APROVACAO_DIRETORIA', label: 'Aprovação da Diretoria' };
       }
       if (/estoque/.test(g3Norm)) {
@@ -1645,11 +1649,20 @@ export function FluigSolicitacoesPage({
         ? columns.find((c: string) => /^produtos[_\s-]*mobile$/i.test(c.trim())) ?? null
         : null;
     const byStatus: Record<string, { label: string; rows: Record<string, unknown>[] }> = {};
+    // Etapa só com o número da atividade: usa o nome do status da aprovação do próprio processo no Fluig.
+    const statusAprovCol =
+      columns.find((c: string) => /^status[\s_-]*(da[\s_-]*)?aprov/i.test(c.trim()))
+      ?? columns.find((c: string) => /status.*aprov/i.test(c.trim()))
+      ?? null;
     if (statusCol) {
       values.forEach((row: Record<string, unknown>) => {
         const rawStatusCell = formatValue(row[statusCol]);
-        const rawStatus =
+        let rawStatus =
           rawStatusCell === '—' || rawStatusCell.trim() === '' ? '(sem etapa)' : rawStatusCell.trim();
+        if (/^(Etapa\s*)?\d+$/i.test(rawStatus) && statusAprovCol) {
+          const nome = formatValue(row[statusAprovCol]).trim();
+          if (nome && nome !== '—' && !/^\d+$/.test(nome) && !/\d{1,2}\/\d{1,2}\/\d{2,4}/.test(nome)) rawStatus = nome;
+        }
         const { key, label } = normalizeStatus(rawStatus);
         if (!byStatus[key]) byStatus[key] = { label, rows: [] };
         byStatus[key].rows.push(row);

@@ -33,7 +33,7 @@ import {
 } from 'lucide-react-native';
 import Svg, { Circle, Defs, LinearGradient as SvgLinearGradient, Rect, Stop } from 'react-native-svg';
 import Toast from 'react-native-toast-message';
-import AppHeader from '../../components/AppHeader';
+import AppHeader, { HeaderIconButton } from '../../components/AppHeader';
 import KanbanSheet from '../../components/KanbanSheet';
 import {
   ArchivedCardsModal,
@@ -42,6 +42,8 @@ import {
   labelTextColor,
 } from '../../components/KanbanBoardModals';
 import { MemberAvatar } from '../../components/KanbanMemberUi';
+import KanbanPresenceBar, { firstName, presenceActionLabel } from '../../components/KanbanPresenceBar';
+import { useKanbanCollab, type KanbanPresence } from '../../lib/kanbanCollab';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { resolveKanbanDefaultBoard } from '../../lib/kanbanDefaultBoard';
@@ -128,20 +130,24 @@ function toHex(r: number, g: number, b: number) {
   return `#${[r, g, b].map((n) => n.toString(16).padStart(2, '0')).join('')}`;
 }
 
-/** Fundo da coluna = tint da bolinha (mesmo mix do web). */
+/** Fundo da coluna = tint da bolinha, meio transparente (a cor deixa o fundo da tela aparecer, como no web). */
 function getKanbanColumnBg(color: string | null | undefined, isDark: boolean): string {
   const accent = parseHexColor(color || '#6B7280') || { r: 107, g: 114, b: 128 };
-  if (isDark) {
-    return toHex(
-      mixChannel(accent.r, 31, 0.28),
-      mixChannel(accent.g, 41, 0.28),
-      mixChannel(accent.b, 55, 0.28),
-    );
-  }
+  return `rgba(${accent.r}, ${accent.g}, ${accent.b}, ${isDark ? 0.22 : 0.16})`;
+}
+
+/**
+ * Cor opaca equivalente ao fundo da coluna sobre o fundo da tela: usada só no esmaecido de baixo,
+ * que precisa esconder o fim dos cards (um fundo translúcido não esconderia nada).
+ */
+function getKanbanColumnFadeColor(color: string | null | undefined, isDark: boolean): string {
+  const accent = parseHexColor(color || '#6B7280') || { r: 107, g: 114, b: 128 };
+  const base = isDark ? { r: 17, g: 24, b: 39 } : { r: 244, g: 246, b: 248 };
+  const w = isDark ? 0.22 : 0.16;
   return toHex(
-    mixChannel(accent.r, 255, 0.22),
-    mixChannel(accent.g, 255, 0.22),
-    mixChannel(accent.b, 255, 0.22),
+    mixChannel(accent.r, base.r, w),
+    mixChannel(accent.g, base.g, w),
+    mixChannel(accent.b, base.b, w),
   );
 }
 
@@ -263,6 +269,7 @@ function BoardCardBase({
   readOnly,
   onPress,
   onToggleComplete,
+  presence,
 }: {
   card: KanbanCard;
   styles: ReturnType<typeof getStyles>;
@@ -271,6 +278,8 @@ function BoardCardBase({
   readOnly: boolean;
   onPress: (card: KanbanCard) => void;
   onToggleComplete: (card: KanbanCard) => void;
+  /** Outras pessoas com este cartão aberto ou sendo movido agora. */
+  presence?: KanbanPresence[];
 }) {
   const suppressOpenRef = useRef(false);
   const labels = Array.isArray(card.labels) ? card.labels : [];
@@ -293,7 +302,10 @@ function BoardCardBase({
 
   return (
     <TouchableOpacity
-      style={styles.card}
+      style={[
+        styles.card,
+        presence && presence.length > 0 ? { borderColor: presence[0].color, borderWidth: 2 } : null,
+      ]}
       onPress={() => {
         if (suppressOpenRef.current) {
           suppressOpenRef.current = false;
@@ -303,6 +315,15 @@ function BoardCardBase({
       }}
       activeOpacity={0.82}
     >
+      {presence && presence.length > 0 ? (
+        <View style={[styles.presenceTag, { backgroundColor: presence[0].color }]}>
+          <Text style={styles.presenceTagText} numberOfLines={1}>
+            {firstName(presence[0].name)} {presenceActionLabel(presence[0].state)}
+            {presence.length > 1 ? ` +${presence.length - 1}` : ''}
+          </Text>
+        </View>
+      ) : null}
+
       {labels.length > 0 ? (
         <View style={styles.labels}>
           {labels.slice(0, 5).map((l, i) => (
@@ -458,7 +479,10 @@ export default function KanbanBoardScreen() {
   const { user } = useAuth();
   const { colors, isDark } = useTheme();
   const [boardAreaH, setBoardAreaH] = useState(0);
-  const columnHeight = Math.max(0, boardAreaH - BOARD_GAP * 2);
+  // A faixa de filtros fica dentro da área do quadro, em cima das colunas: a altura dela sai do espaço
+  // das colunas, senão o fim de cada coluna é cortado.
+  const [filterBarH, setFilterBarH] = useState(0);
+  const columnHeight = Math.max(0, boardAreaH - filterBarH - BOARD_GAP * 2);
   const styles = useMemo(
     () => getStyles(colors, isDark, columnHeight),
     [colors, isDark, columnHeight],
@@ -522,6 +546,45 @@ export default function KanbanBoardScreen() {
   });
 
   const board = boardQuery.data;
+
+  // ── Tempo real: quem está no quadro, em qual cartão, e atualização quando outra pessoa altera algo ──
+  const liveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleChangedByOther = useCallback(() => {
+    if (liveTimerRef.current) clearTimeout(liveTimerRef.current);
+    // Junta várias alterações seguidas numa atualização só.
+    liveTimerRef.current = setTimeout(() => {
+      liveTimerRef.current = null;
+      void queryClient.invalidateQueries({ queryKey: ['kanban-board', departmentKey ?? 'own'] });
+    }, 700);
+  }, [queryClient, departmentKey]);
+  useEffect(
+    () => () => {
+      if (liveTimerRef.current) clearTimeout(liveTimerRef.current);
+    },
+    [],
+  );
+  const collab = useKanbanCollab({ boardId: board?.id, onChangedByOther: handleChangedByOther });
+
+  // Pessoas (sem mim) em cada cartão. Reaproveita os mesmos arrays quando nada mudou.
+  const presenceCacheRef = useRef<Record<string, { sig: string; users: KanbanPresence[] }>>({});
+  const presenceByCard = useMemo(() => {
+    const grouped: Record<string, KanbanPresence[]> = {};
+    for (const u of collab.users) {
+      if (u.userId === collab.selfId || !u.cardId || u.state === 'viewing') continue;
+      (grouped[u.cardId] ??= []).push(u);
+    }
+    const next: Record<string, KanbanPresence[]> = {};
+    const cache: Record<string, { sig: string; users: KanbanPresence[] }> = {};
+    for (const [cardId, users] of Object.entries(grouped)) {
+      const sig = users.map((u) => `${u.userId}:${u.state}`).join('|');
+      const prev = presenceCacheRef.current[cardId];
+      const stable = prev && prev.sig === sig ? prev.users : users;
+      cache[cardId] = { sig, users: stable };
+      next[cardId] = stable;
+    }
+    presenceCacheRef.current = cache;
+    return next;
+  }, [collab.users, collab.selfId]);
 
   /** Filtro por atribuição: 'all', 'mine', 'none' (sem ninguém) ou o id de uma pessoa. */
   const [assigneeFilter, setAssigneeFilter] = useState<string>('all');
@@ -618,9 +681,10 @@ export default function KanbanBoardScreen() {
         onToggleComplete={toggleCardComplete}
         onAdd={openAddCard}
         onEdit={setColumnEdit}
+        presenceByCard={presenceByCard}
       />
     ),
-    [styles, colors, isDark, readOnly, openCard, toggleCardComplete, openAddCard],
+    [styles, colors, isDark, readOnly, openCard, toggleCardComplete, openAddCard, presenceByCard],
   );
 
   const addCard = async () => {
@@ -677,7 +741,7 @@ export default function KanbanBoardScreen() {
         onBack={() => navigation.goBack()}
         rightAction={
           <View style={styles.headerBtns}>
-            <TouchableOpacity
+            <HeaderIconButton
               onPress={() => {
                 const options: Array<{ text: string; onPress?: () => void; style?: 'cancel' }> = [
                   { text: 'Cards arquivados', onPress: () => setArchivedOpen(true) },
@@ -692,13 +756,10 @@ export default function KanbanBoardScreen() {
                 options.push({ text: 'Cancelar', style: 'cancel' });
                 Alert.alert(displayTitle || 'Quadro', undefined, options);
               }}
-              hitSlop={6}
               accessibilityLabel="Mais opções"
-              style={styles.headerBtn}
-              activeOpacity={0.7}
             >
               <MoreHorizontal size={22} color={colors.text} strokeWidth={2.1} />
-            </TouchableOpacity>
+            </HeaderIconButton>
           </View>
         }
       />
@@ -710,9 +771,10 @@ export default function KanbanBoardScreen() {
           style={styles.boardArea}
           onLayout={(e) => setBoardAreaH(e.nativeEvent.layout.height)}
         >
-          <View style={styles.filterBar}>
+          <View style={styles.filterBar} onLayout={(e) => setFilterBarH(e.nativeEvent.layout.height)}>
             <ScrollView
               horizontal
+              style={{ flex: 1 }}
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.filterBarContent}
               keyboardShouldPersistTaps="handled"
@@ -740,6 +802,7 @@ export default function KanbanBoardScreen() {
                 );
               })}
             </ScrollView>
+            <KanbanPresenceBar users={collab.users} selfId={collab.selfId} />
           </View>
           <FlatList
             horizontal
@@ -884,6 +947,7 @@ function ColumnBase({
   onToggleComplete,
   onAdd,
   onEdit,
+  presenceByCard,
 }: {
   column: KanbanColumn;
   styles: ReturnType<typeof getStyles>;
@@ -894,8 +958,10 @@ function ColumnBase({
   onToggleComplete: (c: KanbanCard) => void;
   onAdd: (columnId: string) => void;
   onEdit: (column: KanbanColumn) => void;
+  presenceByCard?: Record<string, KanbanPresence[]>;
 }) {
   const columnBg = getKanbanColumnBg(column.color, isDark);
+  const columnFadeColor = getKanbanColumnFadeColor(column.color, isDark);
   const cards = Array.isArray(column.cards) ? column.cards : [];
   const [showBottomFade, setShowBottomFade] = useState(false);
   const scrollH = useRef(0);
@@ -922,9 +988,10 @@ function ColumnBase({
         readOnly={readOnly}
         onPress={onOpenCard}
         onToggleComplete={onToggleComplete}
+        presence={presenceByCard?.[item.id]}
       />
     ),
-    [styles, colors, isDark, readOnly, onOpenCard, onToggleComplete],
+    [styles, colors, isDark, readOnly, onOpenCard, onToggleComplete, presenceByCard],
   );
 
   return (
@@ -975,7 +1042,7 @@ function ColumnBase({
           scrollEventThrottle={16}
         />
         {showBottomFade ? (
-          <ColumnBottomFade color={columnBg} fadeId={`kanban-fade-${column.id}`} />
+          <ColumnBottomFade color={columnFadeColor} fadeId={`kanban-fade-${column.id}`} />
         ) : null}
       </View>
 
@@ -1033,7 +1100,7 @@ function getStyles(colors: any, isDark: boolean, columnHeight: number) {
     boardArea: {
       flex: 1,
     },
-    filterBar: { paddingTop: 8 },
+    filterBar: { paddingTop: 8, flexDirection: 'row', alignItems: 'center' },
     filterBarContent: { paddingHorizontal: BOARD_GAP, gap: 8, alignItems: 'center' },
     filterChip: {
       paddingHorizontal: 14,
@@ -1107,6 +1174,15 @@ function getStyles(colors: any, isDark: boolean, columnHeight: number) {
       borderWidth: StyleSheet.hairlineWidth * 2,
       borderColor: isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)',
     },
+    presenceTag: {
+      alignSelf: 'flex-start',
+      maxWidth: '100%',
+      marginBottom: 8,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 999,
+    },
+    presenceTagText: { fontSize: 10, fontWeight: '700', color: '#fff' },
     labels: {
       flexDirection: 'row',
       flexWrap: 'wrap',

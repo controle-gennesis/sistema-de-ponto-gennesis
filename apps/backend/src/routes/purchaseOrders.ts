@@ -4,6 +4,23 @@ import { authenticate, requireAdministrator } from '../middleware/auth';
 import { AuthRequest } from '../middleware/auth';
 import { PurchaseOrderService } from '../services/PurchaseOrderService';
 import { createError } from '../middleware/errorHandler';
+import { fasesFluigDasOcs, type FluigOcFase } from '../lib/fluigOcFase';
+
+/** OC enviada ao TOTVS ganha a etapa atual no Fluig (G3/G4), lida do espelho — só leitura. */
+async function comFaseFluig<T>(orders: T[]): Promise<Array<T & { fluigFase: FluigOcFase | null }>> {
+  const idDe = (o: T) => {
+    const id = (o as { totvsIdMov?: unknown }).totvsIdMov;
+    return typeof id === 'number' && id > 0 ? id : null;
+  };
+  const fases = await fasesFluigDasOcs(orders.map(idDe)).catch((err) => {
+    console.error('[PurchaseOrders] fase Fluig das OCs', err);
+    return new Map<number, FluigOcFase>();
+  });
+  return orders.map((o) => {
+    const id = idDe(o);
+    return { ...o, fluigFase: id != null ? fases.get(id) ?? null : null };
+  });
+}
 import { savePersistentUpload } from '../lib/persistentUpload';
 import { fixMulterOriginalName } from '../lib/fixUploadFileName';
 import {
@@ -145,7 +162,8 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
       limit: limit ? parseInt(limit as string, 10) : 20,
       includeItems: wantItems
     });
-    res.json({ success: true, data: result.orders, pagination: result.pagination });
+    const ordersComFase = await comFaseFluig(result.orders as unknown[]);
+    res.json({ success: true, data: ordersComFase, pagination: result.pagination });
   } catch (error) {
     next(error);
   }
@@ -539,7 +557,8 @@ router.get('/:id', async (req: AuthRequest, res: Response, next: NextFunction) =
       (order as { materialRequest?: { costCenter?: { id?: string } | null } }).materialRequest
         ?.costCenter?.id;
     await assertCostCenterAllowedForOcRmUser(req.user.id, !!req.user.isAdmin, costCenterId);
-    res.json({ success: true, data: order });
+    const [orderComFase] = await comFaseFluig([order]);
+    res.json({ success: true, data: orderComFase });
   } catch (error) {
     next(error);
   }
