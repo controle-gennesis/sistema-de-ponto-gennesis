@@ -29,8 +29,11 @@ import {
   CreditCard,
   Gauge,
   ReceiptText,
+  FileSpreadsheet,
+  FileText,
   Filter,
   FilterX,
+  Loader2,
   ListFilter,
   Truck,
   UserCog,
@@ -48,6 +51,8 @@ import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { useTheme } from '@/context/ThemeContext';
+import toast from 'react-hot-toast';
+import { exportDashboardExcel, exportDashboardPdf, type ExportFilterLine } from '@/lib/boletoDashboardExport';
 import { useLogout } from '@/hooks/useLogout';
 import { authService } from '@/lib/auth';
 import api from '@/lib/api';
@@ -816,6 +821,31 @@ function DashboardBoletosPage() {
     staleTime: 60_000,
   });
 
+  const [exporting, setExporting] = useState<'excel' | 'pdf' | null>(null);
+
+  /** Exporta os indicadores que estão na tela (já com os filtros aplicados). */
+  const handleExport = async (kind: 'excel' | 'pdf') => {
+    if (!data) return;
+    const lines: ExportFilterLine[] = [];
+    if (filters.polo) lines.push({ label: 'Polo', value: filters.polo });
+    if (filters.costCenter) lines.push({ label: 'Centro de custo', value: filters.costCenter });
+    if (filters.manager) lines.push({ label: 'Gestor', value: filters.manager });
+    if (filters.status) {
+      lines.push({ label: 'Situação', value: STATUS_OPTIONS.find((o) => o.value === filters.status)?.label ?? filters.status });
+    }
+    if (filters.dueFrom) lines.push({ label: 'Vencimento de', value: filters.dueFrom });
+    if (filters.dueTo) lines.push({ label: 'Vencimento até', value: filters.dueTo });
+    setExporting(kind);
+    try {
+      if (kind === 'excel') await exportDashboardExcel(data, lines);
+      else await exportDashboardPdf(data, lines);
+    } catch {
+      toast.error('Não foi possível exportar. Tente novamente.');
+    } finally {
+      setExporting(null);
+    }
+  };
+
   const filtersActive = Object.values(filters).some((v) => v !== '');
   const setFilter = (k: keyof Filters) => (v: string) => setFilters((p) => ({ ...p, [k]: v }));
 
@@ -876,6 +906,26 @@ function DashboardBoletosPage() {
         </div>
 
         <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => void handleExport('excel')}
+            disabled={!data || exporting !== null}
+            className="inline-flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+            title="Exportar os indicadores filtrados para Excel"
+          >
+            {exporting === 'excel' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
+            <span className="hidden sm:inline">Excel</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleExport('pdf')}
+            disabled={!data || exporting !== null}
+            className="inline-flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+            title="Exportar os indicadores filtrados para PDF"
+          >
+            {exporting === 'pdf' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+            <span className="hidden sm:inline">PDF</span>
+          </button>
           <div className={cadastroListClasses.filterIconButtonWrap}>
             <button
               type="button"
