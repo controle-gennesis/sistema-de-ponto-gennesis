@@ -705,6 +705,14 @@ export class BoletoControlController {
         technicalConfirmedByName: e.technicalConfirmed ? 'Importado da planilha' : null,
       });
 
+      // Ordem da planilha: a lista mostra o cadastrado mais recente primeiro, então a 1ª linha da
+      // planilha recebe o horário mais novo do lote e as seguintes vão ficando 1 ms mais antigas.
+      // O que for cadastrado depois (à mão ou em outro importe) fica acima de tudo.
+      const orderNow = Date.now();
+      const orderAt = new Map<string, Date>(
+        parsed.entries.map((e, i) => [e.importKey, new Date(orderNow - i)] as [string, Date])
+      );
+
       const fresh = parsed.entries.filter((e) => !existingKeys.has(e.importKey));
       const already = parsed.entries.filter((e) => existingKeys.has(e.importKey));
 
@@ -712,7 +720,13 @@ export class BoletoControlController {
       for (let i = 0; i < fresh.length; i += IMPORT_BATCH) {
         const batch = fresh.slice(i, i + IMPORT_BATCH);
         const r = await prisma.boletoControlEntry.createMany({
-          data: batch.map((e) => ({ ...toData(e), importKey: e.importKey, createdBy: userId, updatedBy: userId })),
+          data: batch.map((e) => ({
+            ...toData(e),
+            importKey: e.importKey,
+            createdBy: userId,
+            updatedBy: userId,
+            createdAt: orderAt.get(e.importKey),
+          })),
           skipDuplicates: true,
         });
         created += r.count;
@@ -726,7 +740,8 @@ export class BoletoControlController {
             batch.map((e) =>
               prisma.boletoControlEntry.update({
                 where: { importKey: e.importKey },
-                data: { ...toData(e), updatedBy: userId },
+                // Atualizar também refaz a ordem para ficar igual à da planilha.
+                data: { ...toData(e), updatedBy: userId, createdAt: orderAt.get(e.importKey) },
               })
             )
           );
