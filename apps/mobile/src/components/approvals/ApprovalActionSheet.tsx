@@ -8,7 +8,14 @@ import {
   Platform,
   Alert,
   ActivityIndicator,
+  Modal,
+  Image,
 } from 'react-native';
+import * as WebBrowser from 'expo-web-browser';
+import * as Sharing from 'expo-sharing';
+import { Directory, File as FsFile, Paths } from 'expo-file-system';
+import { Download, Paperclip, X as XIcon } from 'lucide-react-native';
+import { resolveMediaUrl } from '../../utils/resolveMediaUrl';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import SheetModal from '../SheetModal';
 import { showAppToast } from '../AppToast';
@@ -105,6 +112,67 @@ export default function ApprovalActionSheet({
   const fuelRaw = tab === 'fuel' && item ? (item.raw as FuelApprovalRow) : null;
 
   const fdRaw = tab === 'fd' && item ? (item.raw as FdApprovalRow) : null;
+  const [anexoImagem, setAnexoImagem] = useState<{ href: string; nome: string } | null>(null);
+  const [baixandoAnexo, setBaixandoAnexo] = useState<string | null>(null);
+
+  /** Baixa o arquivo para o celular e abre o menu de compartilhar/salvar (Salvar em Arquivos, WhatsApp, etc.). */
+  const baixarAnexo = async (href: string, nome: string) => {
+    setBaixandoAnexo(href);
+    try {
+      const limpo = (nome || 'arquivo').replace(/[\\/:*?"<>|]+/g, '-').trim() || 'arquivo';
+      const dir = new Directory(Paths.cache, 'anexos-fd');
+      if (!dir.exists) dir.create();
+      const arquivo = await FsFile.downloadFileAsync(href, new FsFile(dir, limpo), { idempotent: true });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(arquivo.uri, { dialogTitle: limpo });
+      } else {
+        showAppToast({ type: 'info', text1: 'Arquivo baixado' });
+      }
+    } catch {
+      showAppToast({ type: 'error', text1: 'Não foi possível baixar o anexo' });
+    } finally {
+      setBaixandoAnexo(null);
+    }
+  };
+
+  /** Ver o anexo: imagem abre aqui; PDF abre no visualizador do iPhone; os demais vão direto para baixar/abrir. */
+  const verAnexo = async (href: string, nome: string) => {
+    const alvo = `${nome} ${href}`.toLowerCase().split('?')[0];
+    if (/\.(png|jpe?g|gif|webp|heic)$/.test(alvo.trim())) {
+      setAnexoImagem({ href, nome });
+      return;
+    }
+    if (Platform.OS === 'ios' && /\.pdf$/.test(alvo.trim())) {
+      try {
+        await WebBrowser.openBrowserAsync(href);
+        return;
+      } catch {
+        /* cai no download */
+      }
+    }
+    await baixarAnexo(href, nome);
+  };
+
+  // Arquivos da FD com link (a referência interna do orçamento não é arquivo).
+  const fdAnexos = useMemo(
+    () =>
+      (fdRaw?.anexos ?? [])
+        .filter((a) => a && a.url && a.kind !== 'orcamento-ref')
+        .map((a) => {
+          const n = String(a.name || '').toUpperCase();
+          const tipo =
+            a.kind === 'orcamento' ? 'Orçamento'
+            : a.kind === 'fd' ? 'Ficha de demanda'
+            : a.kind === 'oc' ? 'Ordem de compra'
+            : a.kind === 'outro' ? a.descricao?.trim() || 'Anexo'
+            : /ORDEM\s*DE\s*COMPRA|ANEXO[_-]?OC/.test(n) ? 'Ordem de compra'
+            : /FICHA\s*DE\s*DEMANDA|ANEXO[_-]?FD/.test(n) ? 'Ficha de demanda'
+            : /OR[CÇ]AMENTO/.test(n) ? 'Orçamento'
+            : 'Anexo';
+          return { ...a, tipo };
+        }),
+    [fdRaw],
+  );
   const aditivoRaw = tab === 'aditivo' && item ? (item.raw as AditivoApprovalRow) : null;
   const employeesQuery = useQuery({
     queryKey: ['payroll-employees'],
@@ -411,6 +479,84 @@ export default function ApprovalActionSheet({
               />
               <DetailField styles={styles} label="Data/hora" value={fdRaw.dataHora?.trim() || '—'} />
               <DetailField styles={styles} label="Observação" value={fdRaw.observacao?.trim() || '—'} />
+              {fdAnexos.length > 0 ? (
+                <View style={styles.detailField}>
+                  <Text style={styles.detailLabel}>Anexos</Text>
+                  <View style={{ gap: 8, marginTop: 6 }}>
+                    {fdAnexos.map((a, i) => (
+                      <View key={a.id || `${a.url}-${i}`} style={styles.fdAnexoRow}>
+                        <TouchableOpacity
+                          style={styles.fdAnexoMain}
+                          activeOpacity={0.7}
+                          onPress={() => {
+                            const href = resolveMediaUrl(a.url);
+                            if (href) void verAnexo(href, a.name?.trim() || 'arquivo');
+                          }}
+                        >
+                          <Paperclip size={16} color={colors.textSecondary} />
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.fdAnexoName} numberOfLines={2}>
+                              {a.name?.trim() || 'Arquivo'}
+                            </Text>
+                            <Text style={styles.fdAnexoKind}>{a.tipo}</Text>
+                          </View>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.fdAnexoDownload}
+                          activeOpacity={0.7}
+                          accessibilityLabel="Baixar anexo"
+                          disabled={baixandoAnexo != null}
+                          onPress={() => {
+                            const href = resolveMediaUrl(a.url);
+                            if (href) void baixarAnexo(href, a.name?.trim() || 'arquivo');
+                          }}
+                        >
+                          {baixandoAnexo === resolveMediaUrl(a.url) ? (
+                            <ActivityIndicator size="small" color={colors.primary} />
+                          ) : (
+                            <Download size={18} color={colors.primary} />
+                          )}
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                  </View>
+                  <Modal
+                    visible={anexoImagem != null}
+                    transparent
+                    animationType="fade"
+                    onRequestClose={() => setAnexoImagem(null)}
+                  >
+                    <View style={styles.fdImgBackdrop}>
+                      <View style={styles.fdImgBar}>
+                        <Text style={styles.fdImgTitle} numberOfLines={1}>
+                          {anexoImagem?.nome}
+                        </Text>
+                        <TouchableOpacity
+                          style={styles.fdImgBtn}
+                          accessibilityLabel="Baixar"
+                          onPress={() => anexoImagem && void baixarAnexo(anexoImagem.href, anexoImagem.nome)}
+                        >
+                          {baixandoAnexo != null ? (
+                            <ActivityIndicator size="small" color="#fff" />
+                          ) : (
+                            <Download size={20} color="#fff" />
+                          )}
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.fdImgBtn}
+                          accessibilityLabel="Fechar"
+                          onPress={() => setAnexoImagem(null)}
+                        >
+                          <XIcon size={22} color="#fff" />
+                        </TouchableOpacity>
+                      </View>
+                      {anexoImagem ? (
+                        <Image source={{ uri: anexoImagem.href }} style={styles.fdImg} resizeMode="contain" />
+                      ) : null}
+                    </View>
+                  </Modal>
+                </View>
+              ) : null}
             </View>
           ) : null}
 
@@ -474,6 +620,23 @@ export default function ApprovalActionSheet({
 function getStyles(colors: any, isDark: boolean) {
   return StyleSheet.create({
     detailGrid: { gap: 12 },
+    fdAnexoMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingLeft: 12 },
+    fdAnexoDownload: { width: 46, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center' },
+    fdAnexoRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#f8fafc',
+    },
+    fdImgBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.94)', paddingTop: 54 },
+    fdImgBar: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingBottom: 10 },
+    fdImgTitle: { flex: 1, color: '#fff', fontSize: 15, fontWeight: '600' },
+    fdImgBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+    fdImg: { flex: 1, width: '100%' },
+    fdAnexoName: { fontSize: 14, fontWeight: '600', color: colors.text },
+    fdAnexoKind: { fontSize: 11, color: colors.textSecondary, marginTop: 1 },
     detailField: { gap: 2 },
     detailLabel: {
       fontSize: 11,

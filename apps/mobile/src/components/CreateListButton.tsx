@@ -1,7 +1,9 @@
 import React from 'react';
-import { StyleSheet, TouchableOpacity } from 'react-native';
+import { StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Plus } from 'lucide-react-native';
+import { GlassView } from 'expo-glass-effect';
 import { useTheme } from '../context/ThemeContext';
+import { LIQUID_GLASS } from './GlassBg';
 import {
   emitFabBarLongPress,
   emitFabBarPress,
@@ -11,7 +13,7 @@ import {
 /**
  * Botão "Novo" da linha de busca das listas (no lugar do "+" flutuante). Dispara o mesmo evento
  * que o botão flutuante disparava, então cada tela continua abrindo o seu formulário/menu.
- * Segue o mesmo formato do botão de filtro: quadradinho arredondado, na altura da busca.
+ * Redondo, na altura da busca: fundo vermelho com "+" branco; no iOS 26 o vidro nativo vai por cima.
  */
 export default function CreateListButton({ tab }: { tab: FabBarTabName }) {
   const { colors } = useTheme();
@@ -24,17 +26,27 @@ export default function CreateListButton({ tab }: { tab: FabBarTabName }) {
       accessibilityRole="button"
       accessibilityLabel="Novo"
     >
-      <Plus size={22} color="#fff" strokeWidth={2.5} />
+      {LIQUID_GLASS ? (
+        <View style={StyleSheet.absoluteFill}>
+          <GlassView
+            isInteractive
+            glassEffectStyle="regular"
+            tintColor={colors.primary}
+            style={[StyleSheet.absoluteFill, { borderRadius: 22 }]}
+          />
+        </View>
+      ) : null}
+      <Plus size={24} color="#ffffff" strokeWidth={2.5} />
     </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
   btn: {
-    width: 48,
-    borderRadius: 14,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
-    alignSelf: 'stretch',
   },
 });

@@ -1,3 +1,5 @@
+import { osCodigoComPastaNoXx } from '../utils/serviceOrderLabel';
+import { OrcamentoService } from '../services/OrcamentoService';
 import { Router, Response, NextFunction } from 'express';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { prisma } from '../lib/prisma';
@@ -9,6 +11,7 @@ import { uploadPhoto, handleUploadError } from '../middleware/upload';
 import { savePersistentUpload, deletePersistentUpload } from '../lib/persistentUpload';
 
 const router = Router();
+const orcamentoService = new OrcamentoService();
 router.use(authenticate);
 router.use(requireModuleAccess(pathToModuleKey('/ponto/diario-obra')));
 
@@ -162,6 +165,8 @@ async function buildListWhere(req: AuthRequest): Promise<any | null> {
 function osLabel(divSe: string, folder: string): string {
   const d = divSe.replace(/^(OS|SE)\s+/i, '').trim();
   if (!d) return '';
+  const comNumero = osCodigoComPastaNoXx(d, folder);
+  if (comNumero) return comNumero;
   return folder ? `${d} - ${folder}` : d;
 }
 
@@ -195,6 +200,25 @@ router.get('/os-options', async (req: AuthRequest, res, next) => {
           description: (r.serviceDescription ?? '').trim().slice(0, 140),
         });
       }
+    }
+    // OS dos orçamentos do contrato (código + pasta informados no orçamento), mesmo sem OS criada no contrato.
+    try {
+      const contrato = await prisma.contract.findUnique({ where: { id: contratoId }, select: { costCenterId: true } });
+      if (contrato?.costCenterId) {
+        const index = await orcamentoService.getIndex(contrato.costCenterId);
+        for (const o of index.orcamentos) {
+          const divSe = (o.osCodigo ?? '').trim();
+          const folder = (o.numeroPasta ?? '').trim();
+          const label = osLabel(divSe, folder);
+          if (!label) continue;
+          const key = `${divSe.toLowerCase()}|${folder.toLowerCase()}`;
+          if (!seen.has(key)) {
+            seen.set(key, { divSe, folderNumber: folder, label, description: (o.nome ?? '').trim().slice(0, 140) });
+          }
+        }
+      }
+    } catch {
+      // Falha ao ler os orçamentos não impede de listar as OS do contrato.
     }
     const data = [...seen.values()].sort((a, b) => a.label.localeCompare(b.label, 'pt-BR', { numeric: true }));
     res.json({ success: true, data });

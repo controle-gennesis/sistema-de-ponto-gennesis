@@ -885,6 +885,8 @@ export class KanbanController {
         const upstream = await fetch(att.fileUrl, {
           headers: { Authorization: `OAuth oauth_consumer_key="${key}", oauth_token="${token}"` },
           redirect: 'follow',
+          // Download de arquivo grande: mais tempo que o padrão das chamadas de API.
+          signal: AbortSignal.timeout(10 * 60_000),
         });
         if (!upstream.ok || !upstream.body) {
           return next(

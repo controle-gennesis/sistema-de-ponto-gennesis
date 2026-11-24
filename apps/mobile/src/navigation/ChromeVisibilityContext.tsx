@@ -30,6 +30,8 @@ type ScrollHandlers = {
 
 type ChromeVisibilityContextValue = {
   progress: Animated.Value;
+  /** 0 = conteúdo no topo (barra transparente); 1 = conteúdo rolou por baixo (barra de vidro). */
+  glass: Animated.Value;
   visible: boolean;
   headerHeight: number;
   setHeaderHeight: (height: number) => void;
@@ -52,6 +54,8 @@ export const CHROME_HEADER_FALLBACK = Platform.OS === 'android' ? 96 : 110;
 
 export function ChromeVisibilityProvider({ children }: { children: ReactNode }) {
   const progress = useRef(new Animated.Value(1)).current;
+  const glass = useRef(new Animated.Value(0)).current;
+  const glassOnRef = useRef(false);
   const visibleRef = useRef(true);
   const lastYRef = useRef(0);
   const ignoreNextDyRef = useRef(false);
@@ -116,6 +120,12 @@ export function ChromeVisibilityProvider({ children }: { children: ReactNode }) 
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
       const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
       const rawY = contentOffset.y;
+      // Vidro da barra: aparece quando o conteúdo já rolou por baixo dela.
+      const glassOn = rawY > 6 && contentSize.height - layoutMeasurement.height > 24;
+      if (glassOn !== glassOnRef.current) {
+        glassOnRef.current = glassOn;
+        Animated.timing(glass, { toValue: glassOn ? 1 : 0, duration: 180, useNativeDriver: true }).start();
+      }
       const maxY = Math.max(0, contentSize.height - layoutMeasurement.height);
 
       if (maxY <= 24) {
@@ -163,7 +173,7 @@ export function ChromeVisibilityProvider({ children }: { children: ReactNode }) 
         animate(true);
       }
     },
-    [animate, clearStopTimer],
+    [animate, clearStopTimer, glass],
   );
 
   const onScrollBeginDrag = useCallback(() => {
@@ -199,6 +209,7 @@ export function ChromeVisibilityProvider({ children }: { children: ReactNode }) 
   const value = useMemo(
     () => ({
       progress,
+      glass,
       visible,
       headerHeight,
       setHeaderHeight,
@@ -209,7 +220,7 @@ export function ChromeVisibilityProvider({ children }: { children: ReactNode }) 
       closeMenu,
       scrollHandlers,
     }),
-    [progress, visible, headerHeight, setHeaderHeight, reveal, conceal, menuOpen, openMenu, closeMenu, scrollHandlers],
+    [progress, glass, visible, headerHeight, setHeaderHeight, reveal, conceal, menuOpen, openMenu, closeMenu, scrollHandlers],
   );
 
   return (

@@ -24,6 +24,7 @@ import {
   SquareKanban,
   CalendarDays,
   FileSignature,
+  ClipboardList,
   ListChecks,
   BookOpen,
   ChevronRight,
@@ -36,6 +37,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import { formatCpfDisplay } from '../lib/cpf';
 import { formatMenuDisplayName } from '../lib/formatDisplayName';
 import UserAvatar from './UserAvatar';
+import { GlassBlur } from './GlassBg';
 import type { RootStackParamList } from '../../App';
 
 interface MenuProps {
@@ -171,6 +173,9 @@ export default function Menu({ visible, onClose }: MenuProps) {
     { key: 'tarefas', label: 'Tarefas', icon: ListChecks, onPress: () => go('Tarefas') },
     ...(can('ponto_contratos')
       ? [{ key: 'contratos', label: 'Contratos', icon: FileSignature, onPress: () => go('Contratos') }]
+      : []),
+    ...(can('ponto_aprovacao-fds')
+      ? [{ key: 'fichas-demanda', label: 'Fichas de Demanda', icon: ClipboardList, onPress: () => go('FichasDemanda') }]
       : []),
     ...(can('ponto_diario-obra')
       ? [{ key: 'diario-obra', label: 'Diários de Obra', icon: BookOpen, onPress: () => go('DiarioObra') }]
@@ -347,6 +352,7 @@ export default function Menu({ visible, onClose }: MenuProps) {
                     accessibilityRole="button"
                     accessibilityLabel="Fechar menu"
                   >
+                    <GlassBlur radius={20} />
                     <X size={20} color={colors.text} strokeWidth={2.2} />
                   </TouchableOpacity>
                 </View>
@@ -460,8 +466,9 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   closeBtn: {
-    width: 36,
-    height: 36,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,

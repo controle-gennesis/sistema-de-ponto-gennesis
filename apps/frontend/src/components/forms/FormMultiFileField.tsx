@@ -13,7 +13,6 @@ import {
   X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import * as XLSX from 'xlsx';
 import { loadPdfjs } from '@/lib/loadPdfjs';
 
 export type FormFileItem = {
@@ -235,6 +234,7 @@ async function buildPreviewFromFile(file: File): Promise<Partial<FormFileItem>> 
   }
 
   if (isSpreadsheetMime(mime, name)) {
+    const XLSX = await import('xlsx');
     const wb = XLSX.read(bytes, { type: 'array', sheetRows: 12 });
     const sheetName = wb.SheetNames[0];
     if (!sheetName) throw new Error('Planilha sem abas');
