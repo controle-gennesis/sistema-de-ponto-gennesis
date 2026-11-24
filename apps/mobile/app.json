@@ -24,7 +24,7 @@
         "NSFaceIDUsageDescription": "Use o Face ID para entrar no aplicativo com segurança após o primeiro acesso.",
         "ITSAppUsesNonExemptEncryption": false
       },
-      "buildNumber": "1"
+      "buildNumber": "2"
     },
     "android": {
       "versionCode": 21,
