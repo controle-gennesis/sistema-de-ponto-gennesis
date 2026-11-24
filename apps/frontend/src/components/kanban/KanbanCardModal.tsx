@@ -80,7 +80,7 @@ import { KanbanCardActionButton } from './KanbanCardActionButton';
 import { KanbanCardDatesPanel } from './KanbanCardDatesPopover';
 import { KanbanCardLabelsPanel, KanbanLabelChips } from './KanbanCardLabelsPopover';
 import { KanbanCardCoverPanel } from './KanbanCardCoverPanel';
-import { normalizeCoverSize, type KanbanCoverSize } from './kanbanCover';
+import { coverHex, normalizeCoverSize, type KanbanCoverSize } from './kanbanCover';
 import { getKanbanLabelNameForColor, type KanbanLabelPreset } from './kanbanLabels';
 import {
   LicitacaoCommentEditor,
@@ -1995,6 +1995,30 @@ export function KanbanCardModal({
       headerActions={
         isDetail ? (
           <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => setOpenMenu((m) => (m === 'cover' ? null : 'cover'))}
+              title="Capa colorida do cartão"
+              aria-label="Capa colorida do cartão"
+              className={clsx(
+                'inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-sm transition-colors',
+                'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200',
+                'border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500',
+                saving && 'opacity-50 pointer-events-none',
+              )}
+            >
+              {coverColor ? (
+                <span
+                  className="h-4 w-4 shrink-0 rounded"
+                  style={{ backgroundColor: coverHex(coverColor) ?? undefined }}
+                  aria-hidden
+                />
+              ) : (
+                <Palette className="w-4 h-4 text-gray-400 shrink-0" />
+              )}
+              <span className="font-medium whitespace-nowrap">Capa</span>
+            </button>
             <KanbanPriorityPicker
               value={priority}
               disabled={saving}
@@ -2090,15 +2114,6 @@ export function KanbanCardModal({
                   title={hasLabels ? 'Remover todas as etiquetas' : 'Adicionar etiquetas'}
                 >
                   Etiquetas
-                </KanbanCardActionButton>
-                <KanbanCardActionButton
-                  icon={<Palette className="w-4 h-4" />}
-                  active={!!coverColor}
-                  onClick={() => setOpenMenu((m) => (m === 'cover' ? null : 'cover'))}
-                  className="shrink-0"
-                  title="Capa colorida do cartão"
-                >
-                  Capa
                 </KanbanCardActionButton>
                 <KanbanCardActionButton
                   icon={<Clock className="w-4 h-4" />}
