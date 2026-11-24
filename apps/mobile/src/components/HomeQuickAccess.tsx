@@ -11,6 +11,7 @@ import {
   ListChecks,
   SquareKanban,
   FileSignature,
+  ClipboardList,
   Wrench,
   type LucideIcon,
 } from 'lucide-react-native';
@@ -60,6 +61,9 @@ export default function HomeQuickAccess() {
     },
     ...(can('ponto_contratos')
       ? [{ key: 'contratos', label: 'Contratos', icon: FileSignature, onPress: () => navigation.navigate('Contratos') }]
+      : []),
+    ...(can('ponto_aprovacao-fds')
+      ? [{ key: 'fichas-demanda', label: 'Fichas de Demanda', icon: ClipboardList, onPress: () => navigation.navigate('FichasDemanda') }]
       : []),
     ...(can('ponto_diario-obra')
       ? [{ key: 'diario-obra', label: 'Diários de Obra', icon: BookOpen, onPress: () => navigation.navigate('DiarioObra') }]

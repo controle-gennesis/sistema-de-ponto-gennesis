@@ -11,7 +11,7 @@ import {
   Platform,
 } from 'react-native';
 import { SquarePen } from 'lucide-react-native';
-import GlassBg from '../components/GlassBg';
+import { GlassBlur } from '../components/GlassBg';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQueryClient } from '@tanstack/react-query';
@@ -143,11 +143,8 @@ export default function HomeScreen() {
             hitSlop={8}
             style={styles.editBtn}
           >
-            {/* Fundo translúcido liso: o vidro real piscava ao voltar para esta tela. */}
-            <View style={styles.editBtnInner}>
-              <GlassBg radius={23} />
-              <SquarePen size={20} color={colors.text} strokeWidth={2} />
-            </View>
+            <GlassBlur white radius={23} />
+            <SquarePen size={20} color={colors.text} strokeWidth={2} />
           </TouchableOpacity>
         </View>
 
@@ -186,21 +183,8 @@ const getStyles = (colors: any, isDark: boolean) =>
       width: 46,
       height: 46,
       borderRadius: 23,
-      shadowColor: '#000',
-      shadowOpacity: 0.07,
-      shadowRadius: 8,
-      shadowOffset: { width: 0, height: 2 },
-      elevation: 2,
-    },
-    editBtnInner: {
-      width: 46,
-      height: 46,
-      borderRadius: 23,
-      overflow: 'hidden',
       alignItems: 'center',
       justifyContent: 'center',
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: isDark ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.7)',
     },
     greetingEyebrow: {
       fontSize: 13,

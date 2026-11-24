@@ -25,7 +25,7 @@ import {
   Linking,
   Image,
 } from 'react-native';
-import { BlurView } from 'expo-blur';
+import { GlassBlur } from '../components/GlassBg';
 import KanbanSheet from '../components/KanbanSheet';
 import { PLANNER_ICON_MAP, PLANNER_ICON_OPTIONS } from '../lib/plannerIcons';
 import { MemberPickerSheet } from '../components/KanbanMemberUi';
@@ -375,19 +375,10 @@ function FloatingGlassButton({
         accessibilityRole="button"
         accessibilityLabel={accessibilityLabel}
       >
-        {Platform.OS === 'ios' ? (
-          <BlurView
-            intensity={70}
-            tint={isDark ? 'systemChromeMaterialDark' : 'systemChromeMaterialLight'}
-            style={[styles.floatTodayInner, round && styles.floatRound]}
-          >
-            {label}
-          </BlurView>
-        ) : (
-          <View style={[styles.floatTodayInner, round && styles.floatRound, { backgroundColor: colors.surface }]}>
-            {label}
-          </View>
-        )}
+        <View style={[styles.floatTodayInner, round && styles.floatRound]}>
+          <GlassBlur radius={999} />
+          {label}
+        </View>
       </Pressable>
     </Animated.View>
   );

@@ -52,6 +52,14 @@ export type FdApprovalRow = {
   custoEstimado?: number | string | null;
   observacao?: string | null;
   dataHora?: string | null;
+  /** Origem no orçamento e aprovador: a FD lançada pelo orçamento não passa por aprovação. */
+  /** Etapa de compras depois de aprovada: QUOTATION, PURCHASE_REQUEST, SUPPLIES, FINISHED, CANCELLED… */
+  purchaseStatus?: string | null;
+  orcamentoId?: string | null;
+  managerApproverNome?: string | null;
+  managerRejectionComment?: string | null;
+  /** Arquivos da FD (orçamento, ficha, ordem de compra e outros). */
+  anexos?: Array<{ id?: string; name?: string; url?: string; kind?: string; descricao?: string }> | null;
 };
 
 export type RmApprovalRow = {
@@ -168,6 +176,16 @@ export async function approveFuelRequest(id: string, comment = ''): Promise<void
 export async function rejectFuelRequest(id: string, comment: string): Promise<void> {
   const res = await api.put(`/api/fuel-refuel-requests/${id}/manager-reject`, { comment });
   await readApiData(res);
+}
+
+/** Lista de Fichas de Demanda (as mesmas do site, só as dos contratos que a pessoa pode ver). */
+export async function fetchFdList(params: { search?: string; status?: string } = {}): Promise<FdApprovalRow[]> {
+  const q = new URLSearchParams();
+  if (params.search?.trim()) q.set('search', params.search.trim());
+  if (params.status && params.status !== 'ALL') q.set('status', params.status);
+  const qs = q.toString();
+  const res = await api.get(`/api/demand-sheet-approvals${qs ? `?${qs}` : ''}`);
+  return (await readApiData<FdApprovalRow[]>(res)) || [];
 }
 
 export async function fetchFdApprovals(phase: ApprovalPhase = 'PENDING'): Promise<FdApprovalRow[]> {

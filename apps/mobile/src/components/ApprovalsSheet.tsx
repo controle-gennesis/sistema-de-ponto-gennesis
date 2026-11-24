@@ -16,7 +16,6 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  CalendarDays,
   ChevronRight,
   ClipboardList,
   FilePlus2,
@@ -526,11 +525,6 @@ export default function ApprovalsSheet({ visible, onClose }: Props) {
               ) : null}
               <View style={styles.itemFooter}>
                 <View style={styles.metaLine}>
-                  <CalendarDays
-                    size={13}
-                    color={isDark ? 'rgba(255,255,255,0.38)' : 'rgba(15,23,42,0.4)'}
-                    strokeWidth={2.2}
-                  />
                   <Text style={styles.itemMeta}>{itemDateLabel(item)}</Text>
                 </View>
                 <View style={styles.detailsHint}>

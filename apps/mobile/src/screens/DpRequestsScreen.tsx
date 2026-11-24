@@ -1,4 +1,5 @@
 import CreateListButton from '../components/CreateListButton';
+import { GlassBlur } from '../components/GlassBg';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
@@ -1177,11 +1178,12 @@ export default function DpRequestsScreen() {
         </ScrollView>
 
         <View style={styles.searchRow}>
-          <View style={styles.searchBox}>
+          <View style={[styles.searchBox, styles.searchBoxGlass]}>
+            <GlassBlur white radius={22} />
             <Search size={16} color={colors.textSecondary} strokeWidth={2} />
             <TextInput
               style={styles.searchInput}
-              placeholder="Buscar..."
+              placeholder="Pesquisar"
               placeholderTextColor={colors.textSecondary}
               value={search}
               onChangeText={setSearch}
@@ -1199,9 +1201,10 @@ export default function DpRequestsScreen() {
             activeOpacity={0.75}
             accessibilityLabel="Filtrar status"
           >
+            {statusFilter === 'all' ? <GlassBlur white /> : null}
             <Filter
               size={18}
-              color={statusFilter !== 'all' ? '#fff' : colors.primary}
+              color={statusFilter !== 'all' ? '#fff' : isDark ? '#ffffff' : '#000000'}
               strokeWidth={2.2}
             />
             {statusFilter !== 'all' ? <View style={styles.filterDot} /> : null}
@@ -2850,37 +2853,39 @@ function getStyles(colors: any, isDark: boolean) {
     chipCountActive: { color: 'rgba(255,255,255,0.85)', opacity: 1 },
     searchRow: {
       flexDirection: 'row',
-      alignItems: 'stretch',
+      alignItems: 'center',
       gap: 10,
       marginBottom: 16,
     },
+    // Padrão iPhone: busca em pílula cinza translúcida, sem borda.
     searchBox: {
       flex: 1,
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 10,
-      backgroundColor: isDark ? colors.card : colors.surface,
-      borderRadius: 14,
+      gap: 8,
+      backgroundColor: isDark ? colors.card : '#ffffff',
+      borderRadius: 22,
       paddingHorizontal: 14,
-      minHeight: 48,
-      borderWidth: StyleSheet.hairlineWidth * 1.5,
+      minHeight: 44,
+      borderWidth: StyleSheet.hairlineWidth,
       borderColor: isDark ? 'transparent' : 'rgba(15, 23, 42, 0.08)',
     },
+    // Com o Liquid Glass nativo o fundo e a borda vêm do próprio vidro.
+    searchBoxGlass: { backgroundColor: 'transparent', borderWidth: 0 },
     searchInput: {
       flex: 1,
       paddingVertical: Platform.OS === 'ios' ? 12 : 8,
       color: colors.text,
       fontSize: 15,
     },
+    // Botão redondo de vidro (padrão iPhone).
     filterBtn: {
-      width: 48,
-      borderRadius: 14,
+      width: 44,
+      height: 44,
+      borderRadius: 22,
       alignItems: 'center',
       justifyContent: 'center',
-      alignSelf: 'stretch',
-      backgroundColor: isDark ? colors.card : colors.surface,
-      borderWidth: StyleSheet.hairlineWidth * 1.5,
-      borderColor: isDark ? 'transparent' : 'rgba(15, 23, 42, 0.08)',
+      backgroundColor: 'transparent',
     },
     filterBtnActive: {
       backgroundColor: colors.primary,
