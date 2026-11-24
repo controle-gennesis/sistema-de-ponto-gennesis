@@ -1140,6 +1140,12 @@ export class DemandSheetApprovalController {
         orderBy: { createdAt: 'desc' },
       });
 
+      // Modo leve (app): só os dados da ficha. Pula o custo real, a OS/pasta e o total pago das OCs,
+      // que o site usa na lista em níveis e que custam consultas extras por ficha.
+      if (String(req.query.resumo ?? '') === '1') {
+        return res.json({ success: true, data: rows.map(serializeRow) });
+      }
+
       // Custo real: o espelho da aba Ficha de demanda (inclui valores digitados e os vindos das OCs);
       // sem espelho, soma as OCs enviadas ao TOTVS para os itens pedidos pela FD.
       const custoRealPorFd = new Map<string, number>();

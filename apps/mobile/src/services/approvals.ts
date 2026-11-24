@@ -180,7 +180,8 @@ export async function rejectFuelRequest(id: string, comment: string): Promise<vo
 
 /** Lista de Fichas de Demanda (as mesmas do site, só as dos contratos que a pessoa pode ver). */
 export async function fetchFdList(params: { search?: string; status?: string } = {}): Promise<FdApprovalRow[]> {
-  const q = new URLSearchParams();
+  // resumo=1: o servidor pula as contas por ficha que só o site usa (custo real, OS/pasta, total pago).
+  const q = new URLSearchParams({ resumo: '1' });
   if (params.search?.trim()) q.set('search', params.search.trim());
   if (params.status && params.status !== 'ALL') q.set('status', params.status);
   const qs = q.toString();
