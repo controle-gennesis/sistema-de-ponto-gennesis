@@ -58,6 +58,7 @@
       "translucent": true
     },
     "plugins": [
+      "./plugins/withOptionalHardware",
       [
         "@react-native-community/datetimepicker",
         {
