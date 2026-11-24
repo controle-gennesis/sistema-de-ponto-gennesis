@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import {
   Area,
@@ -10,9 +11,6 @@ import {
   CartesianGrid,
   Cell,
   LabelList,
-  Legend,
-  Pie,
-  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -58,12 +56,11 @@ import { authService } from '@/lib/auth';
 import api from '@/lib/api';
 import {
   BAR_STAGGER_MS,
-  CountUpLabel,
   type ChartLabelProps,
   FadeInTopLabel,
-  growingBarShape,
   growingColumnShape,
   rowInStyle,
+  prefersReducedMotion,
   useAnimatedNumber,
 } from '@/lib/chartAnimation';
 
@@ -101,7 +98,17 @@ const STATUS_OPTIONS = [
 ];
 
 const CHART_PALETTE = ['#b91c1c', '#0f766e', '#1e40af', '#c2410c', '#0891b2', '#a16207', '#be185d', '#334155'];
-const STATUS_COLORS = { pago: '#059669', aVencer: '#d97706', vencido: '#dc2626' };
+const STATUS_COLORS = { pago: '#34d399', aVencer: '#f59e0b', vencido: '#f87171' };
+/** Azul das barras, o mesmo do gráfico de Faturamento das páginas de contrato. */
+const SERIES_BLUE = '#60a5fa';
+
+/** Valores curtos nos eixos e rótulos das barras: 233K, 2,2M. */
+function compactAxis(v: number): string {
+  const abs = Math.abs(v);
+  if (abs >= 1_000_000) return `${(v / 1_000_000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}M`;
+  if (abs >= 1_000) return `${(v / 1_000).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}K`;
+  return v.toLocaleString('pt-BR', { maximumFractionDigits: 0 });
+}
 const MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -166,20 +173,6 @@ function ChartLightTooltip({
   );
 }
 
-/** Degradês das barras (um por cor), como nos gráficos de contrato. */
-function BarGradients({ idPrefix, colors, horizontal = false }: { idPrefix: string; colors: string[]; horizontal?: boolean }) {
-  return (
-    <defs>
-      {colors.map((c, i) => (
-        <linearGradient key={`${c}-${i}`} id={`${idPrefix}-${i}`} x1="0" y1="0" x2={horizontal ? 1 : 0} y2={horizontal ? 0 : 1}>
-          <stop offset="0%" stopColor={c} stopOpacity={horizontal ? 0.6 : 0.95} />
-          <stop offset="100%" stopColor={c} stopOpacity={horizontal ? 1 : 0.55} />
-        </linearGradient>
-      ))}
-    </defs>
-  );
-}
-
 function SectionTitle({
   icon: Icon,
   title,
@@ -206,18 +199,26 @@ function SectionTitle({
   );
 }
 
+/** Bolinha + nome da série, no canto do cartão (como em Faturamento por Mês x Meta). */
+function LegendDot({ color, label }: { color: string; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: color }} /> {label}
+    </span>
+  );
+}
+
 function ChartCard({
-  icon,
   title,
   subtitle,
+  legend,
   className,
   children,
-  iconBg,
-  iconColor,
 }: {
-  icon: LucideIcon;
+  icon?: LucideIcon;
   title: string;
-  subtitle?: string;
+  subtitle?: React.ReactNode;
+  legend?: React.ReactNode;
   className?: string;
   children: React.ReactNode;
   iconBg?: string;
@@ -225,8 +226,16 @@ function ChartCard({
 }) {
   return (
     <Card className={`${cadastroListClasses.card} flex h-full min-h-0 flex-col ${className || ''}`}>
-      <CardHeader className={cadastroListClasses.cardHeader}>
-        <SectionTitle icon={icon} title={title} subtitle={subtitle} iconBg={iconBg} iconColor={iconColor} />
+      <CardHeader className={`${cadastroListClasses.cardHeader} !pt-5`}>
+        <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-2">
+          <div className="min-w-0 flex-1">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 sm:text-xl">{title}</h3>
+            {subtitle ? <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{subtitle}</p> : null}
+          </div>
+          {legend ? (
+            <div className="flex shrink-0 flex-wrap items-center justify-end gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400">{legend}</div>
+          ) : null}
+        </div>
       </CardHeader>
       <CardContent className={`${cadastroListClasses.cardContent} flex min-h-0 flex-1 flex-col`}>{children}</CardContent>
     </Card>
@@ -237,141 +246,18 @@ function ChartEmpty({ icon }: { icon: LucideIcon }) {
   return <CadastroListEmpty icon={icon} hint="Ajuste os filtros para ver os dados" title="Sem dados no filtro atual" />;
 }
 
-/** Barras horizontais de valor total (ranking). */
-function RankBarChart({ data, icon, color }: { data: Bucket[]; icon: LucideIcon; color?: string }) {
-  const theme = useChartTheme();
-  const uid = React.useId().replace(/:/g, '');
-  if (!data.length) return <ChartEmpty icon={icon} />;
-  const max = Math.max(...data.map((d) => d.value), 1);
-  const height = Math.max(220, data.length * 38 + 16);
-  const longest = Math.max(...data.map((d) => d.label.length), 1);
-  const yAxisWidth = Math.min(168, Math.max(68, Math.round(longest * 6.4)));
-  const rightMargin = Math.min(108, Math.max(60, Math.round(brlCompact(max).length * 7)));
-  const labelMax = Math.max(10, Math.floor(yAxisWidth / 6.2));
-  return (
-    <div className="w-full" style={{ height }}>
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} layout="vertical" margin={{ top: 2, right: rightMargin, bottom: 2, left: 0 }} barCategoryGap="18%">
-          <BarGradients idPrefix={`rk-${uid}`} colors={data.map((d, i) => color ?? CHART_PALETTE[i % CHART_PALETTE.length])} horizontal />
-          <CartesianGrid strokeDasharray="3 3" stroke={theme.chartGrid} horizontal={false} />
-          <XAxis type="number" hide domain={[0, max]} />
-          <YAxis
-            type="category"
-            dataKey="label"
-            width={yAxisWidth}
-            tickLine={false}
-            axisLine={false}
-            tickMargin={4}
-            tick={{ fill: theme.chartTick, fontSize: 11 }}
-            tickFormatter={(v: string) => truncate(v, labelMax)}
-          />
-          <Tooltip
-            cursor={{ fill: theme.barCursor, radius: 8 }}
-            content={({ active, payload }) => {
-              const b = payload?.[0]?.payload as Bucket | undefined;
-              return (
-                <ChartLightTooltip
-                  active={active}
-                  label={b?.label}
-                  rows={b ? [{ key: 'v', name: `Total · ${b.count} boletos`, value: brl(b.value), color: String(payload?.[0]?.color || '#64748b') }] : []}
-                />
-              );
-            }}
-          />
-          <Bar dataKey="value" radius={[0, 6, 6, 0]} maxBarSize={26} isAnimationActive={false} shape={growingBarShape('value')}>
-            {data.map((d, i) => (
-              <Cell key={d.key} fill={`url(#rk-${uid}-${i})`} />
-            ))}
-            <LabelList
-              dataKey="value"
-              content={(labelProps) => (
-                <CountUpLabel {...(labelProps as unknown as ChartLabelProps)} color={theme.chartLabel} format={brlCompact} />
-              )}
-            />
-          </Bar>
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
-  );
-}
-
-function DonutChart({ data, icon }: { data: Bucket[]; icon: LucideIcon }) {
-  const theme = useChartTheme();
-  const total = data.reduce((s, d) => s + d.value, 0);
-  const totalShown = useAnimatedNumber(total, 0, 1100);
-  const [hover, setHover] = useState<number | null>(null);
-  if (!data.length || total <= 0) return <ChartEmpty icon={icon} />;
-  const slices = data.map((d, i) => ({ ...d, color: CHART_PALETTE[i % CHART_PALETTE.length] }));
-  return (
-    <div className="flex flex-col items-stretch gap-5 sm:flex-row sm:items-center">
-      <div className="relative mx-auto h-[210px] w-[210px] shrink-0 sm:mx-0">
-        <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
-            <Pie
-              data={slices}
-              dataKey="value"
-              nameKey="label"
-              cx="50%"
-              cy="50%"
-              innerRadius={44}
-              outerRadius={96}
-              paddingAngle={1.5}
-              stroke={theme.pieStroke}
-              strokeWidth={3}
-              cornerRadius={3}
-              animationDuration={1100}
-              animationEasing="ease-out"
-              onMouseEnter={(_, i) => setHover(i)}
-              onMouseLeave={() => setHover(null)}
-            >
-              {slices.map((s) => (
-                <Cell key={s.key} fill={s.color} fillOpacity={hover === null || hover === slices.indexOf(s) ? 1 : 0.45} />
-              ))}
-            </Pie>
-          </PieChart>
-        </ResponsiveContainer>
-        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-          <span className="max-w-[80px] truncate text-base font-bold leading-none tabular-nums text-gray-900 dark:text-gray-100">
-            {hover !== null && slices[hover] ? brlCompact(slices[hover].value) : brlCompact(totalShown)}
-          </span>
-          <span className="mt-1 max-w-[80px] truncate text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
-            {hover !== null && slices[hover] ? slices[hover].label : "Total"}
-          </span>
-        </div>
-      </div>
-      <ul className="min-w-0 flex-1 space-y-2.5">
-        {slices.slice(0, 7).map((s) => {
-          const pct = Math.round((s.value / total) * 1000) / 10;
-          return (
-            <li key={s.key} className="flex items-center gap-2 text-xs">
-              <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: s.color }} aria-hidden />
-              <span className="min-w-0 flex-1 truncate font-medium text-gray-800 dark:text-gray-100" title={s.label}>
-                {s.label}
-              </span>
-              <span className="shrink-0 font-semibold tabular-nums text-gray-700 dark:text-gray-200">{brlCompact(s.value)}</span>
-              <span className="w-12 shrink-0 text-right tabular-nums text-gray-500 dark:text-gray-400">{pct.toLocaleString('pt-BR')}%</span>
-            </li>
-          );
-        })}
-      </ul>
-    </div>
-  );
-}
-
 /** Colunas empilhadas por mês de vencimento: pago / à vencer / vencido. */
 function MonthlyChart({ data }: { data: Bucket[] }) {
   const theme = useChartTheme();
-  const uid = React.useId().replace(/:/g, '');
   if (!data.length) return <ChartEmpty icon={CalendarRange} />;
   const rows = data.map((d) => ({ ...d, mes: monthLabel(d.key) }));
   return (
-    <div className="h-[320px] w-full">
+    <div className="h-[260px] w-full">
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={rows} margin={{ top: 12, right: 8, bottom: 4, left: 4 }} barCategoryGap="22%">
-          <BarGradients idPrefix={`mo-${uid}`} colors={[STATUS_COLORS.pago, STATUS_COLORS.aVencer, STATUS_COLORS.vencido]} />
-          <CartesianGrid strokeDasharray="3 3" stroke={theme.chartGrid} vertical={false} />
-          <XAxis dataKey="mes" tickLine={false} axisLine={false} tick={{ fill: theme.chartTick, fontSize: 11 }} interval={0} angle={rows.length > 14 ? -45 : 0} textAnchor={rows.length > 14 ? 'end' : 'middle'} height={rows.length > 14 ? 48 : 28} />
-          <YAxis tickLine={false} axisLine={false} width={64} tick={{ fill: theme.chartTick, fontSize: 11 }} tickFormatter={(v) => brlCompact(Number(v))} />
+        <BarChart data={rows} margin={{ top: 22, right: 10, bottom: 4, left: 0 }} barCategoryGap="22%">
+          <CartesianGrid strokeDasharray="4 6" stroke={theme.chartGrid} vertical={false} />
+          <XAxis dataKey="mes" tickLine={false} axisLine={false} tickMargin={6} tick={{ fill: theme.chartTick, fontSize: 11, fontWeight: 500 }} interval={0} angle={rows.length > 14 ? -45 : 0} textAnchor={rows.length > 14 ? 'end' : 'middle'} height={rows.length > 14 ? 48 : 28} />
+          <YAxis tickLine={false} axisLine={false} width={44} tick={{ fill: theme.chartTick, fontSize: 10 }} tickFormatter={(v) => compactAxis(Number(v))} />
           <Tooltip
             cursor={{ fill: theme.barCursor, radius: 8 }}
             content={({ active, label, payload }) => (
@@ -387,10 +273,18 @@ function MonthlyChart({ data }: { data: Bucket[] }) {
               />
             )}
           />
-          <Legend wrapperStyle={{ fontSize: 12 }} />
-          <Bar dataKey="pago" name="Pago" stackId="s" fill={`url(#mo-${uid}-0)`} isAnimationActive={false} shape={growingColumnShape('pago', 0)} />
-          <Bar dataKey="aVencer" name="À vencer" stackId="s" fill={`url(#mo-${uid}-1)`} isAnimationActive={false} shape={growingColumnShape('aVencer', 0)} />
-          <Bar dataKey="vencido" name="Vencido" stackId="s" fill={`url(#mo-${uid}-2)`} radius={[4, 4, 0, 0]} isAnimationActive={false} shape={growingColumnShape('vencido', 4)} />
+          <Bar dataKey="pago" name="Pago" stackId="s" fill={STATUS_COLORS.pago} maxBarSize={44} isAnimationActive={false} shape={growingColumnShape('pago', 0)} />
+          <Bar dataKey="aVencer" name="À vencer" stackId="s" fill={STATUS_COLORS.aVencer} maxBarSize={44} isAnimationActive={false} shape={growingColumnShape('aVencer', 0)} />
+          <Bar dataKey="vencido" name="Vencido" stackId="s" fill={STATUS_COLORS.vencido} maxBarSize={44} isAnimationActive={false} shape={growingColumnShape('vencido', 6)}>
+            <LabelList
+              dataKey="vencido"
+              content={(labelProps) => {
+                const lp = labelProps as unknown as ChartLabelProps;
+                const total = rows[Number(lp.index ?? 0)]?.value ?? 0;
+                return <FadeInTopLabel {...lp} value={total} color={theme.chartLabel} fontSize={11} format={compactAxis} />;
+              }}
+            />
+          </Bar>
         </BarChart>
       </ResponsiveContainer>
     </div>
@@ -399,7 +293,6 @@ function MonthlyChart({ data }: { data: Bucket[] }) {
 
 function PaymentTypeBlock({ data }: { data: Bucket[] }) {
   const theme = useChartTheme();
-  const uid = React.useId().replace(/:/g, '');
   const total = data.reduce((s, d) => s + d.value, 0);
   const totalCount = data.reduce((s, d) => s + d.count, 0);
   if (!totalCount) return <ChartEmpty icon={CreditCard} />;
@@ -407,11 +300,10 @@ function PaymentTypeBlock({ data }: { data: Bucket[] }) {
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
       <div className="h-[260px] w-full">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data} margin={{ top: 18, right: 8, bottom: 4, left: 4 }} barCategoryGap="22%">
-            <BarGradients idPrefix={`pt-${uid}`} colors={data.map((_, i) => CHART_PALETTE[i % CHART_PALETTE.length])} />
+          <BarChart data={data} margin={{ top: 22, right: 10, bottom: 4, left: 0 }} barCategoryGap="28%">
             <CartesianGrid strokeDasharray="4 6" stroke={theme.chartGrid} vertical={false} />
-            <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fill: theme.chartTick, fontSize: 10 }} interval={0} tickFormatter={(v: string) => truncate(v, 14)} />
-            <YAxis tickLine={false} axisLine={false} width={64} tick={{ fill: theme.chartTick, fontSize: 11 }} tickFormatter={(v) => brlCompact(Number(v))} />
+            <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={6} tick={{ fill: theme.chartTick, fontSize: 11, fontWeight: 500 }} interval={0} tickFormatter={(v: string) => truncate(v, 14)} />
+            <YAxis tickLine={false} axisLine={false} width={44} tick={{ fill: theme.chartTick, fontSize: 10 }} tickFormatter={(v) => compactAxis(Number(v))} />
             <Tooltip
               cursor={{ fill: theme.barCursor, radius: 8 }}
               content={({ active, label, payload }) => (
@@ -422,14 +314,14 @@ function PaymentTypeBlock({ data }: { data: Bucket[] }) {
                 />
               )}
             />
-            <Bar dataKey="value" radius={[6, 6, 0, 0]} maxBarSize={56} isAnimationActive={false} shape={growingColumnShape('value', 6)}>
-              {data.map((d, i) => (
-                <Cell key={d.key} fill={`url(#pt-${uid}-${i})`} />
+            <Bar dataKey="value" radius={[6, 6, 0, 0]} maxBarSize={44} isAnimationActive={false} shape={growingColumnShape('value', 6)}>
+              {data.map((d) => (
+                <Cell key={d.key} fill={SERIES_BLUE} />
               ))}
               <LabelList
                 dataKey="value"
                 content={(labelProps) => (
-                  <FadeInTopLabel {...(labelProps as unknown as ChartLabelProps)} color={theme.chartLabel} format={brlCompact} />
+                  <FadeInTopLabel {...(labelProps as unknown as ChartLabelProps)} color={theme.chartLabel} fontSize={11} format={compactAxis} />
                 )}
               />
             </Bar>
@@ -464,36 +356,34 @@ function PaymentTypeBlock({ data }: { data: Bucket[] }) {
 
 function ConditionBlock({ data, total }: { data: Bucket[]; total: number }) {
   const theme = useChartTheme();
-  const uid = React.useId().replace(/:/g, '');
   if (!data.length) return <ChartEmpty icon={ReceiptText} />;
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
       <div className="h-[280px] w-full">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data} margin={{ top: 18, right: 8, bottom: 4, left: 4 }} barCategoryGap="22%">
-            <BarGradients idPrefix={`cd-${uid}`} colors={['#0f766e']} />
+          <BarChart data={data} margin={{ top: 22, right: 10, bottom: 4, left: 0 }} barCategoryGap="28%">
             <CartesianGrid strokeDasharray="4 6" stroke={theme.chartGrid} vertical={false} />
-            <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fill: theme.chartTick, fontSize: 10 }} interval={0} tickFormatter={(v: string) => truncate(v, 12)} />
-            <YAxis tickLine={false} axisLine={false} width={64} tick={{ fill: theme.chartTick, fontSize: 11 }} tickFormatter={(v) => brlCompact(Number(v))} />
+            <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={6} tick={{ fill: theme.chartTick, fontSize: 11, fontWeight: 500 }} interval={0} tickFormatter={(v: string) => truncate(v, 12)} />
+            <YAxis tickLine={false} axisLine={false} width={44} tick={{ fill: theme.chartTick, fontSize: 10 }} tickFormatter={(v) => compactAxis(Number(v))} />
             <Tooltip
               cursor={{ fill: theme.barCursor, radius: 8 }}
               content={({ active, label, payload }) => (
                 <ChartLightTooltip
                   active={active}
                   label={label}
-                  rows={(payload ?? []).map((e) => ({ key: 'v', name: 'Valor', value: brl(Number(e.value) || 0), color: '#0f766e' }))}
+                  rows={(payload ?? []).map((e) => ({ key: 'v', name: 'Valor', value: brl(Number(e.value) || 0), color: SERIES_BLUE }))}
                 />
               )}
             />
-            <Bar dataKey="value" fill={`url(#cd-${uid}-0)`}radius={[6, 6, 0, 0]} maxBarSize={48} isAnimationActive={false} shape={growingColumnShape('value', 6)}>
+            <Bar dataKey="value" fill={SERIES_BLUE} radius={[6, 6, 0, 0]} maxBarSize={44} isAnimationActive={false} shape={growingColumnShape('value', 6)}>
               <LabelList
                 dataKey="value"
                 content={(labelProps) => (
                   <FadeInTopLabel
                     {...(labelProps as unknown as ChartLabelProps)}
                     color={theme.chartLabel}
-                    fontSize={10}
-                    format={brlCompact}
+                    fontSize={11}
+                    format={compactAxis}
                   />
                 )}
               />
@@ -706,7 +596,7 @@ function PaidGaugeCard({ paid, total }: { paid: number; total: number }) {
   return (
     <Card className={`${cadastroListClasses.card} flex min-h-0 flex-col`}>
       <CardHeader className={`${cadastroListClasses.cardHeader} !pt-5`}>
-        <SectionTitle icon={Gauge} title="Progresso" iconBg="bg-emerald-100 dark:bg-emerald-900/30" iconColor="text-emerald-600 dark:text-emerald-400" />
+        <SectionTitle icon={Gauge} title="Progresso" />
       </CardHeader>
       <CardContent className={`${cadastroListClasses.cardContent} flex min-h-0 flex-1 flex-col !pt-1`}>
         <div className="flex min-h-0 flex-1 items-center justify-center">
@@ -783,6 +673,134 @@ function AnimatedKpiCard({
       iconColor={iconColor}
       loading={loading}
     />
+  );
+}
+
+/** Cartão de módulo (como Orçamentos / Cronogramas / Diários de Obra do contrato). */
+function ModuleCard({
+  icon,
+  iconBg,
+  iconColor,
+  title,
+  children,
+  footerLeft,
+  footerHref,
+  footerLabel = 'Ver detalhes',
+  className,
+}: {
+  icon: LucideIcon;
+  iconBg: string;
+  iconColor: string;
+  title: string;
+  children: React.ReactNode;
+  footerLeft?: React.ReactNode;
+  footerHref?: string;
+  footerLabel?: string;
+  className?: string;
+}) {
+  return (
+    <Card className={`${cadastroListClasses.card} flex h-full min-h-0 flex-col ${className || ''}`}>
+      <CardHeader className={`${cadastroListClasses.cardHeader} !pt-5`}>
+        <SectionTitle icon={icon} title={title} iconBg={iconBg} iconColor={iconColor} />
+      </CardHeader>
+      <CardContent className={`${cadastroListClasses.cardContent} flex min-h-0 flex-1 flex-col gap-4`}>
+        <div className="flex-1 space-y-4">{children}</div>
+        {footerLeft || footerHref ? (
+          <div className="flex items-center justify-between gap-3 border-t border-gray-200 pt-3 text-xs dark:border-gray-700">
+            <span className="min-w-0 truncate text-gray-500 dark:text-gray-400">{footerLeft}</span>
+            {footerHref ? (
+              <Link href={footerHref} className="shrink-0 font-semibold text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300">
+                {footerLabel} ›
+              </Link>
+            ) : null}
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Bloco colorido com número (verde, amarelo, vermelho ou azul), como os do cartão de Orçamentos. */
+function StatTile({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone: 'green' | 'amber' | 'red' | 'blue' }) {
+  const tones = {
+    green: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300',
+    amber: 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300',
+    red: 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300',
+    blue: 'bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300',
+  } as const;
+  return (
+    <div className={`rounded-xl px-3 py-2.5 ${tones[tone]}`}>
+      <p className="text-[11px] font-medium opacity-90">{label}</p>
+      <p className="mt-0.5 truncate text-sm font-semibold tabular-nums">{value}</p>
+      {sub ? <p className="text-[11px] opacity-80">{sub}</p> : null}
+    </div>
+  );
+}
+
+/** Faixa de aviso (verde quando está tudo certo, vermelha ou amarela quando precisa de atenção). */
+function NoticeBar({ tone, children }: { tone: 'green' | 'amber' | 'red'; children: React.ReactNode }) {
+  const tones = {
+    green: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300',
+    amber: 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300',
+    red: 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300',
+  } as const;
+  return <div className={`rounded-lg px-3 py-2 text-xs font-semibold ${tones[tone]}`}>{children}</div>;
+}
+
+/** Lista com barra fina de progresso: rótulo à esquerda, valor à direita (como Faturamento estimado / Custo estimado). */
+function RankProgressList({
+  data,
+  icon,
+  showPercent = false,
+  color = SERIES_BLUE,
+  getValue = (b: Bucket) => b.value,
+}: {
+  data: Bucket[];
+  icon: LucideIcon;
+  showPercent?: boolean;
+  color?: string;
+  getValue?: (b: Bucket) => number;
+}) {
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    if (prefersReducedMotion()) {
+      setOn(true);
+      return;
+    }
+    const id = requestAnimationFrame(() => setOn(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+  const rows = data.filter((b) => getValue(b) > 0);
+  if (!rows.length) return <ChartEmpty icon={icon} />;
+  const max = Math.max(...rows.map(getValue), 1);
+  const sum = rows.reduce((acc, b) => acc + getValue(b), 0);
+  return (
+    <ul className="space-y-3.5">
+      {rows.map((b, i) => {
+        const v = getValue(b);
+        return (
+          <li key={b.key}>
+            <div className="flex items-baseline justify-between gap-3 text-xs">
+              <span className="min-w-0 truncate font-medium text-gray-700 dark:text-gray-300" title={b.label}>
+                {b.label}
+              </span>
+              <span className="shrink-0 font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+                {brl(v)}
+                {showPercent && sum > 0 ? (
+                  <span className="ml-2 font-normal text-gray-500 dark:text-gray-400">{(Math.round((v / sum) * 1000) / 10).toLocaleString('pt-BR')}%</span>
+                ) : null}
+              </span>
+            </div>
+            <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700/70">
+              <div
+                className="h-full rounded-full transition-[width] duration-700 ease-out"
+                style={{ width: on ? `${Math.max(2, (v / max) * 100)}%` : '0%', backgroundColor: color, transitionDelay: `${Math.min(i, 12) * 60}ms` }}
+              />
+            </div>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -863,8 +881,6 @@ function DashboardBoletosPage() {
     { key: 'pago', label: 'Pagos', count: t?.PAGO.count ?? 0, value: t?.PAGO.value ?? 0, Icon: CircleCheck, bg: 'bg-emerald-100 dark:bg-emerald-900/30', color: 'text-emerald-600 dark:text-emerald-300' },
     { key: 'avencer', label: 'À vencer', count: t?.A_VENCER.count ?? 0, value: t?.A_VENCER.value ?? 0, Icon: Clock, bg: 'bg-amber-100 dark:bg-amber-900/30', color: 'text-amber-600 dark:text-amber-300' },
     { key: 'vencido', label: 'Vencidos', count: t?.VENCIDO.count ?? 0, value: t?.VENCIDO.value ?? 0, Icon: AlertTriangle, bg: 'bg-red-100 dark:bg-red-900/30', color: 'text-red-600 dark:text-red-300' },
-    { key: 'media', label: 'Valor médio por boleto', count: 0, value: t && t.all.count ? t.all.value / t.all.count : 0, Icon: Calculator, bg: 'bg-teal-100 dark:bg-teal-900/30', color: 'text-teal-600 dark:text-teal-300' },
-    { key: 'next30', label: 'Vencem em 30 dias', count: data?.next30.count ?? 0, value: data?.next30.value ?? 0, Icon: CalendarClock, bg: 'bg-purple-100 dark:bg-purple-900/30', color: 'text-purple-600 dark:text-purple-300' },
   ];
 
   return (
@@ -875,20 +891,7 @@ function DashboardBoletosPage() {
           description="Indicadores de pagos, à vencer e vencidos por polo, gestor, centro de custo e mês de vencimento"
         />
 
-        {!isError ? (
-          <div className="grid grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-3">
-            <div className="h-full lg:col-span-2">
-              <TotalAreaCard
-                total={t?.all.value ?? 0}
-                paidPct={t && t.all.value > 0 ? (t.PAGO.value / t.all.value) * 100 : 0}
-                byMonth={data?.byMonth ?? []}
-              />
-            </div>
-            <PaidGaugeCard paid={t?.PAGO.value ?? 0} total={t?.all.value ?? 0} />
-          </div>
-        ) : null}
-
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-4">
           {kpis.map((k, i) => (
             <AnimatedKpiCard
               key={k.key}
@@ -904,6 +907,19 @@ function DashboardBoletosPage() {
             />
           ))}
         </div>
+
+        {!isError ? (
+          <div className="grid grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-3">
+            <div className="h-full lg:col-span-2">
+              <TotalAreaCard
+                total={t?.all.value ?? 0}
+                paidPct={t && t.all.value > 0 ? (t.PAGO.value / t.all.value) * 100 : 0}
+                byMonth={data?.byMonth ?? []}
+              />
+            </div>
+            <PaidGaugeCard paid={t?.PAGO.value ?? 0} total={t?.all.value ?? 0} />
+          </div>
+        ) : null}
 
         <div className="flex items-center justify-end gap-2">
           <button
@@ -994,40 +1010,129 @@ function DashboardBoletosPage() {
             <CardContent className="py-10 text-center text-sm text-gray-700 dark:text-gray-300">Não foi possível carregar os indicadores.</CardContent>
           </Card>
         ) : (
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <ChartCard icon={CalendarRange} title="Valor por mês de vencimento" iconBg="bg-sky-100 dark:bg-sky-900/30" iconColor="text-sky-600 dark:text-sky-400" subtitle="Pago, à vencer e vencido" className="lg:col-span-2">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+            <ChartCard
+              title="Valor por mês de vencimento"
+              subtitle={
+                <>
+                  Boletos de cada mês de vencimento, somando <strong className="text-gray-800 dark:text-gray-100">{brlCompact(data.totals.all.value)}</strong> em{' '}
+                  <strong className="text-gray-800 dark:text-gray-100">{data.byMonth.length}</strong> {data.byMonth.length === 1 ? 'mês' : 'meses'}.
+                </>
+              }
+              legend={
+                <>
+                  <LegendDot color={STATUS_COLORS.pago} label="Pago" />
+                  <LegendDot color={STATUS_COLORS.aVencer} label="À vencer" />
+                  <LegendDot color={STATUS_COLORS.vencido} label="Vencido" />
+                </>
+              }
+              className="lg:col-span-3"
+            >
               <MonthlyChart data={data.byMonth} />
             </ChartCard>
 
-            <ChartCard icon={CalendarRange} title="Resumo mensal por polo" iconBg="bg-violet-100 dark:bg-violet-900/30" iconColor="text-violet-600 dark:text-violet-400" subtitle="Valor e quantidade por mês de vencimento" className="lg:col-span-2">
+            <ModuleCard
+              icon={Wallet}
+              iconBg="bg-blue-100 dark:bg-blue-900/30"
+              iconColor="text-blue-600 dark:text-blue-400"
+              title="Situação dos boletos"
+              footerLeft={`Valor médio: ${brl(data.totals.all.count ? data.totals.all.value / data.totals.all.count : 0)}`}
+              footerHref="/ponto/controle-boletos"
+              footerLabel="Ver boletos"
+            >
+              <div>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Valor total</p>
+                <p className="text-2xl font-semibold tabular-nums text-gray-900 dark:text-gray-50">{brl(data.totals.all.value)}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">{data.totals.all.count.toLocaleString('pt-BR')} boletos</p>
+              </div>
+              <div className="grid grid-cols-2 gap-2.5">
+                <StatTile tone="green" label="Pagos" value={brlCompact(data.totals.PAGO.value)} sub={`${data.totals.PAGO.count.toLocaleString('pt-BR')} boletos`} />
+                <StatTile tone="amber" label="À vencer" value={brlCompact(data.totals.A_VENCER.value)} sub={`${data.totals.A_VENCER.count.toLocaleString('pt-BR')} boletos`} />
+                <StatTile tone="red" label="Vencidos" value={brlCompact(data.totals.VENCIDO.value)} sub={`${data.totals.VENCIDO.count.toLocaleString('pt-BR')} boletos`} />
+                <StatTile
+                  tone="blue"
+                  label="Em aberto"
+                  value={brlCompact(data.totals.A_VENCER.value + data.totals.VENCIDO.value)}
+                  sub={`${(data.totals.A_VENCER.count + data.totals.VENCIDO.count).toLocaleString('pt-BR')} boletos`}
+                />
+              </div>
+            </ModuleCard>
+
+            <ModuleCard
+              icon={AlertTriangle}
+              iconBg="bg-red-100 dark:bg-red-900/30"
+              iconColor="text-red-600 dark:text-red-400"
+              title="Vencidos"
+              footerLeft="Quem concentra os vencidos"
+              footerHref="/ponto/controle-boletos"
+              footerLabel="Ver na lista"
+            >
+              <div>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Valor vencido</p>
+                <p className="text-2xl font-semibold tabular-nums text-gray-900 dark:text-gray-50">{brl(data.totals.VENCIDO.value)}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">{data.totals.VENCIDO.count.toLocaleString('pt-BR')} boletos</p>
+              </div>
+              {data.totals.VENCIDO.count === 0 ? (
+                <NoticeBar tone="green">Nenhum boleto vencido</NoticeBar>
+              ) : (
+                <NoticeBar tone="red">
+                  {data.totals.VENCIDO.count.toLocaleString('pt-BR')} {data.totals.VENCIDO.count === 1 ? 'boleto vencido' : 'boletos vencidos'}
+                </NoticeBar>
+              )}
+              <RankProgressList data={[...data.byCostCenter].sort((x, y) => y.vencido - x.vencido).slice(0, 4)} icon={AlertTriangle} color={STATUS_COLORS.vencido} getValue={(b) => b.vencido} />
+            </ModuleCard>
+
+            <ModuleCard
+              icon={CalendarClock}
+              iconBg="bg-purple-100 dark:bg-purple-900/30"
+              iconColor="text-purple-600 dark:text-purple-400"
+              title="Próximos 30 dias"
+              footerLeft="Boletos que vencem em até 30 dias"
+              footerHref="/ponto/controle-boletos"
+              footerLabel="Ver na lista"
+            >
+              <div>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Valor a vencer</p>
+                <p className="text-2xl font-semibold tabular-nums text-gray-900 dark:text-gray-50">{brl(data.next30.value)}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">{data.next30.count.toLocaleString('pt-BR')} boletos</p>
+              </div>
+              {data.next30.count === 0 ? (
+                <NoticeBar tone="green">Nada vencendo nos próximos 30 dias</NoticeBar>
+              ) : (
+                <NoticeBar tone="amber">{data.next30.count.toLocaleString('pt-BR')} {data.next30.count === 1 ? 'boleto vence' : 'boletos vencem'} em até 30 dias</NoticeBar>
+              )}
+              <RankProgressList data={[...data.byCostCenter].sort((x, y) => y.aVencer - x.aVencer).slice(0, 4)} icon={CalendarClock} color={STATUS_COLORS.aVencer} getValue={(b) => b.aVencer} />
+            </ModuleCard>
+
+            <ModuleCard icon={Banknote} iconBg="bg-rose-100 dark:bg-rose-900/30" iconColor="text-rose-600 dark:text-rose-400" title="Valor por polo">
+              <RankProgressList data={data.byPolo} icon={Banknote} showPercent />
+            </ModuleCard>
+
+            <ModuleCard icon={UserCog} iconBg="bg-violet-100 dark:bg-violet-900/30" iconColor="text-violet-600 dark:text-violet-400" title="Valor por gestor">
+              <RankProgressList data={data.byManager} icon={UserCog} showPercent />
+            </ModuleCard>
+
+            <ModuleCard icon={Wallet} iconBg="bg-indigo-100 dark:bg-indigo-900/30" iconColor="text-indigo-600 dark:text-indigo-400" title="Centros de custo">
+              <RankProgressList data={data.byCostCenter.slice(0, 8)} icon={Wallet} />
+            </ModuleCard>
+
+            <ModuleCard icon={Truck} iconBg="bg-emerald-100 dark:bg-emerald-900/30" iconColor="text-emerald-600 dark:text-emerald-400" title="Fornecedores" className="lg:col-span-3">
+              <RankProgressList data={data.bySupplier.slice(0, 10)} icon={Truck} />
+            </ModuleCard>
+
+            <ChartCard title="Resumo mensal por polo" subtitle="Valor e quantidade por mês de vencimento" className="lg:col-span-3">
               <MonthlySummaryTable rows={data.byMonthPolo ?? []} polos={data.byPolo.map((p) => p.label)} />
             </ChartCard>
 
-            <ChartCard icon={CreditCard} title="Total por tipo de pagamento" iconBg="bg-amber-100 dark:bg-amber-900/30" iconColor="text-amber-600 dark:text-amber-400" subtitle="Classificado pela condição de pagamento" className="lg:col-span-2">
+            <ChartCard title="Total por tipo de pagamento" subtitle="Classificado pela condição de pagamento" className="lg:col-span-3">
               <PaymentTypeBlock data={data.byPaymentType ?? []} />
             </ChartCard>
 
-            <ChartCard icon={ReceiptText} title="Principais condições de pagamento" iconBg="bg-teal-100 dark:bg-teal-900/30" iconColor="text-teal-600 dark:text-teal-400" subtitle="8 maiores por valor" className="lg:col-span-2">
+            <ChartCard title="Principais condições de pagamento" subtitle="8 maiores por valor" className="lg:col-span-3">
               <ConditionBlock data={data.byCondition ?? []} total={data.totals.all.value} />
             </ChartCard>
 
-            <ChartCard icon={Banknote} title="Valor por polo" iconBg="bg-rose-100 dark:bg-rose-900/30" iconColor="text-rose-600 dark:text-rose-400" subtitle="Distribuição do valor total">
-              <DonutChart data={data.byPolo} icon={Banknote} />
-            </ChartCard>
-
-            <ChartCard icon={UserCog} title="Valor por gestor" iconBg="bg-violet-100 dark:bg-violet-900/30" iconColor="text-violet-600 dark:text-violet-400" subtitle="Centros de custo agrupados pelo gestor do contrato">
-              <RankBarChart data={data.byManager} icon={UserCog} />
-            </ChartCard>
-
-            <ChartCard icon={Wallet} title="Valor por centro de custo" iconBg="bg-indigo-100 dark:bg-indigo-900/30" iconColor="text-indigo-600 dark:text-indigo-400" subtitle="10 maiores">
-              <RankBarChart data={data.byCostCenter.slice(0, 10)} icon={Wallet} color="#1e40af" />
-            </ChartCard>
-
-            <ChartCard icon={Truck} title="Valor por fornecedor" iconBg="bg-emerald-100 dark:bg-emerald-900/30" iconColor="text-emerald-600 dark:text-emerald-400" subtitle="10 maiores">
-              <RankBarChart data={data.bySupplier.slice(0, 10)} icon={Truck} color="#0f766e" />
-            </ChartCard>
-
-            <ChartCard icon={Wallet} title="Todos os centros de custo" iconBg="bg-sky-100 dark:bg-sky-900/30" iconColor="text-sky-600 dark:text-sky-400" subtitle="Total no período, com % do período" className="lg:col-span-2">
+            <ChartCard title="Todos os centros de custo" subtitle="Total no período, com % do período" className="lg:col-span-3">
               <CostCenterTable data={data.byCostCenter} total={data.totals.all.value} />
             </ChartCard>
           </div>
