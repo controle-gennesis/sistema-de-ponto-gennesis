@@ -1,6 +1,8 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
+import { toast } from 'react-hot-toast';
+import { toPng } from 'html-to-image';
 import { useQuery } from '@tanstack/react-query';
 import {
   Area,
@@ -29,9 +31,11 @@ import {
   CreditCard,
   Gauge,
   ReceiptText,
-  Filter,
+  Download,
+  FileText,
   FilterX,
   ListFilter,
+  Loader2,
   Truck,
   UserCog,
   Wallet,
@@ -46,6 +50,14 @@ import { Loading } from '@/components/ui/Loading';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { MultiSelectSearchDropdown } from '@/components/ui/MultiSelectSearchDropdown';
+import {
+  exportDashboardBoletosExcel,
+  exportDashboardBoletosPdf,
+  type DashReport,
+  type DashReportChart,
+  type DashReportTable,
+} from '@/lib/exportDashboardBoletos';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { useTheme } from '@/context/ThemeContext';
 import { useLogout } from '@/hooks/useLogout';
@@ -85,8 +97,58 @@ type Dashboard = {
   byMonthPolo: Array<{ key: string; polos: Record<string, { value: number; count: number }> }>;
 };
 
-type Filters = { polo: string; costCenter: string; manager: string; dueFrom: string; dueTo: string };
-const EMPTY_FILTERS: Filters = { polo: '', costCenter: '', manager: '', dueFrom: '', dueTo: '' };
+type Filters = {
+  polo: string[];
+  costCenter: string[];
+  manager: string[];
+  supplier: string[];
+  status: string;
+  periodo: string;
+  dueFrom: string;
+  dueTo: string;
+};
+const EMPTY_FILTERS: Filters = { polo: [], costCenter: [], manager: [], supplier: [], status: '', periodo: '', dueFrom: '', dueTo: '' };
+
+const STATUS_OPCOES = [
+  { value: 'PAGO', label: 'Pago' },
+  { value: 'A_VENCER', label: 'À vencer' },
+  { value: 'VENCIDO', label: 'Vencido' },
+];
+const STATUS_LABEL: Record<string, string> = { PAGO: 'Pago', A_VENCER: 'À vencer', VENCIDO: 'Vencido' };
+
+/** Atalhos de período (por data de vencimento) → intervalo AAAA-MM-DD. */
+const PERIODOS = [
+  { value: 'este-mes', label: 'Este mês' },
+  { value: 'mes-anterior', label: 'Mês anterior' },
+  { value: 'proximo-mes', label: 'Próximo mês' },
+  { value: 'proximos-30', label: 'Próximos 30 dias' },
+  { value: 'este-ano', label: 'Este ano' },
+  { value: 'ano-anterior', label: 'Ano anterior' },
+  { value: 'personalizado', label: 'Personalizado' },
+];
+const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+function intervaloDoPeriodo(p: string): { dueFrom: string; dueTo: string } | null {
+  const hoje = new Date();
+  const y = hoje.getFullYear();
+  const m = hoje.getMonth();
+  switch (p) {
+    case 'este-mes':
+      return { dueFrom: ymd(new Date(y, m, 1)), dueTo: ymd(new Date(y, m + 1, 0)) };
+    case 'mes-anterior':
+      return { dueFrom: ymd(new Date(y, m - 1, 1)), dueTo: ymd(new Date(y, m, 0)) };
+    case 'proximo-mes':
+      return { dueFrom: ymd(new Date(y, m + 1, 1)), dueTo: ymd(new Date(y, m + 2, 0)) };
+    case 'proximos-30':
+      return { dueFrom: ymd(hoje), dueTo: ymd(new Date(y, m, hoje.getDate() + 30)) };
+    case 'este-ano':
+      return { dueFrom: `${y}-01-01`, dueTo: `${y}-12-31` };
+    case 'ano-anterior':
+      return { dueFrom: `${y - 1}-01-01`, dueTo: `${y - 1}-12-31` };
+    default:
+      return null;
+  }
+}
+const fmtYmd = (v: string) => (/^\d{4}-\d{2}-\d{2}$/.test(v) ? `${v.slice(8, 10)}/${v.slice(5, 7)}/${v.slice(0, 4)}` : v);
 
 const CHART_PALETTE = ['#b91c1c', '#0f766e', '#1e40af', '#c2410c', '#0891b2', '#a16207', '#be185d', '#334155'];
 const STATUS_COLORS = { pago: '#059669', aVencer: '#d97706', vencido: '#dc2626' };
@@ -202,6 +264,7 @@ function ChartCard({
   children,
   iconBg,
   iconColor,
+  exportChart,
 }: {
   icon: LucideIcon;
   title: string;
@@ -210,9 +273,14 @@ function ChartCard({
   children: React.ReactNode;
   iconBg?: string;
   iconColor?: string;
+  /** Entra como imagem no PDF exportado (título usado no relatório). */
+  exportChart?: string;
 }) {
   return (
-    <Card className={`${cadastroListClasses.card} flex h-full min-h-0 flex-col ${className || ''}`}>
+    <Card
+      className={`${cadastroListClasses.card} flex h-full min-h-0 flex-col ${className || ''}`}
+      data-export-chart={exportChart || undefined}
+    >
       <CardHeader className={cadastroListClasses.cardHeader}>
         <SectionTitle icon={icon} title={title} subtitle={subtitle} iconBg={iconBg} iconColor={iconColor} />
       </CardHeader>
@@ -787,16 +855,27 @@ function DashboardBoletosPage() {
   const handleLogout = useLogout();
   const user = authService.getUser();
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
-  const [showFilters, setShowFilters] = useState(false);
+  const [exportando, setExportando] = useState<'pdf' | 'excel' | null>(null);
+  const chartsRef = useRef<HTMLDivElement>(null);
+  const { isDark, toggleTheme } = useTheme();
 
-  const params = useMemo(
-    () => Object.fromEntries(Object.entries(filters).filter(([, v]) => v)) as Partial<Filters>,
-    [filters],
-  );
+  // Parâmetros enviados ao servidor (listas vão como polo=a&polo=b).
+  const params = useMemo(() => {
+    const out: Record<string, string | string[]> = {};
+    if (filters.polo.length) out.polo = filters.polo;
+    if (filters.costCenter.length) out.costCenter = filters.costCenter;
+    if (filters.manager.length) out.manager = filters.manager;
+    if (filters.supplier.length) out.supplier = filters.supplier;
+    if (filters.status) out.status = filters.status;
+    if (filters.dueFrom) out.dueFrom = filters.dueFrom;
+    if (filters.dueTo) out.dueTo = filters.dueTo;
+    return out;
+  }, [filters]);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['boleto-control-dashboard', params],
-    queryFn: async () => (await api.get('/boleto-control/dashboard', { params })).data?.data as Dashboard,
+    queryFn: async () =>
+      (await api.get('/boleto-control/dashboard', { params, paramsSerializer: { indexes: null } })).data?.data as Dashboard,
     enabled: !!user,
     placeholderData: (prev) => prev,
   });
@@ -804,13 +883,181 @@ function DashboardBoletosPage() {
   const { data: options } = useQuery({
     queryKey: ['boleto-control-options'],
     queryFn: async () =>
-      (await api.get('/boleto-control/options')).data?.data as { polos: string[]; costCenters: string[]; managers: string[] },
+      (await api.get('/boleto-control/options')).data?.data as {
+        polos: string[];
+        costCenters: string[];
+        managers: string[];
+        suppliers?: string[];
+      },
     enabled: !!user,
     staleTime: 60_000,
   });
 
-  const filtersActive = Object.values(filters).some((v) => v !== '');
-  const setFilter = (k: keyof Filters) => (v: string) => setFilters((p) => ({ ...p, [k]: v }));
+  const filtersActive =
+    filters.polo.length + filters.costCenter.length + filters.manager.length + filters.supplier.length > 0 ||
+    !!filters.status ||
+    !!filters.dueFrom ||
+    !!filters.dueTo;
+  const setLista = (k: 'polo' | 'costCenter' | 'manager' | 'supplier') => (v: string[]) => setFilters((p) => ({ ...p, [k]: v }));
+  const escolherPeriodo = (v: string) => {
+    const iv = intervaloDoPeriodo(v);
+    setFilters((p) => ({ ...p, periodo: v, ...(iv ?? (v ? {} : { dueFrom: '', dueTo: '' })) }));
+  };
+  const setData = (k: 'dueFrom' | 'dueTo') => (v: string) => setFilters((p) => ({ ...p, periodo: 'personalizado', [k]: v }));
+  const opt = (lista?: string[]) => (lista ?? []).map((v) => ({ value: v, label: v }));
+
+  /** Filtros ativos em texto (para o relatório). */
+  const filtrosTexto = (): string[] => {
+    const out: string[] = [];
+    if (filters.dueFrom || filters.dueTo) {
+      const nome = PERIODOS.find((p) => p.value === filters.periodo && p.value !== 'personalizado')?.label;
+      const partes = [filters.dueFrom ? `de ${fmtYmd(filters.dueFrom)}` : '', filters.dueTo ? `até ${fmtYmd(filters.dueTo)}` : '']
+        .filter(Boolean)
+        .join(' ');
+      out.push(`Vencimento ${partes}${nome ? ` (${nome})` : ''}`);
+    }
+    if (filters.status) out.push(`Situação: ${STATUS_LABEL[filters.status] ?? filters.status}`);
+    if (filters.polo.length) out.push(`Polo: ${filters.polo.join(', ')}`);
+    if (filters.costCenter.length) out.push(`Centro de custo: ${filters.costCenter.join(', ')}`);
+    if (filters.manager.length) out.push(`Gestor: ${filters.manager.join(', ')}`);
+    if (filters.supplier.length) out.push(`Fornecedor: ${filters.supplier.join(', ')}`);
+    return out;
+  };
+
+  /** Monta o relatório (mesmos filtros da tela) com as listas completas do servidor. */
+  const montarRelatorio = async (): Promise<DashReport> => {
+    const res = await api.get('/boleto-control/dashboard', {
+      params: { ...params, export: '1' },
+      paramsSerializer: { indexes: null },
+      timeout: 180_000,
+    });
+    const d = res.data?.data as Dashboard & {
+      rows?: Array<{
+        supplierName: string | null;
+        ocNumber: string | null;
+        idMov: string | null;
+        nfNumber: string | null;
+        costCenterName: string | null;
+        manager: string;
+        polo: string | null;
+        paymentCondition: string | null;
+        value: number;
+        dueDate: string | null;
+        status: string;
+      }>;
+    };
+    const tt = d.totals;
+    const pct = (v: number) => (tt.all.value > 0 ? Math.round((v / tt.all.value) * 10000) / 100 : 0);
+    const bucketTable = (title: string, sheet: string, label: string, data: Bucket[], ordenarPorChave = false): DashReportTable => {
+      const lista = ordenarPorChave ? data : [...data].sort((a, b) => b.value - a.value);
+      return {
+        title,
+        sheet,
+        headers: [label, 'Qtd.', 'Valor total', 'Pago', 'À vencer', 'Vencido', '% do total'],
+        numeric: [false, true, true, true, true, true, true],
+        rows: lista.map((b) => [ordenarPorChave ? monthLabel(b.key) : b.label, b.count, b.value, b.pago, b.aVencer, b.vencido, pct(b.value)]),
+        total: [
+          'Total',
+          lista.reduce((s, b) => s + b.count, 0),
+          lista.reduce((s, b) => s + b.value, 0),
+          lista.reduce((s, b) => s + b.pago, 0),
+          lista.reduce((s, b) => s + b.aVencer, 0),
+          lista.reduce((s, b) => s + b.vencido, 0),
+          lista.length ? 100 : 0,
+        ],
+      };
+    };
+    const tables: DashReportTable[] = [
+      bucketTable('Valor por mês de vencimento', 'Por mês', 'Mês', d.byMonth, true),
+      bucketTable('Valor por polo', 'Por polo', 'Polo', d.byPolo),
+      bucketTable('Valor por gestor', 'Por gestor', 'Gestor', d.byManager),
+      bucketTable('Valor por centro de custo', 'Por centro de custo', 'Centro de custo', d.byCostCenter),
+      bucketTable('Valor por fornecedor', 'Por fornecedor', 'Fornecedor', d.bySupplier),
+      bucketTable('Total por tipo de pagamento', 'Por tipo de pagamento', 'Tipo de pagamento', (d.byPaymentType ?? []).filter((b) => b.count > 0)),
+      bucketTable('Condições de pagamento', 'Por condição', 'Condição', d.byCondition ?? []),
+    ];
+    const rowsBoletos = d.rows ?? [];
+    const boletos: DashReportTable = {
+      title: 'Boletos',
+      sheet: 'Boletos',
+      headers: ['Fornecedor', 'OC', 'IdMov', 'NF', 'Centro de custo', 'Gestor', 'Polo', 'Condição', 'Vencimento', 'Situação', 'Valor'],
+      numeric: [false, false, false, false, false, false, false, false, false, false, true],
+      rows: rowsBoletos.map((b) => [
+        b.supplierName ?? '',
+        b.ocNumber ?? '',
+        b.idMov ?? '',
+        b.nfNumber ?? '',
+        b.costCenterName ?? '',
+        b.manager ?? '',
+        b.polo ?? '',
+        b.paymentCondition ?? '',
+        b.dueDate ? fmtYmd(b.dueDate) : '',
+        STATUS_LABEL[b.status] ?? b.status,
+        b.value,
+      ]),
+      total: ['Total', '', '', '', '', '', '', '', '', `${rowsBoletos.length} boleto(s)`, rowsBoletos.reduce((s, b) => s + b.value, 0)],
+    };
+    const qtd = (n: number) => `${n.toLocaleString('pt-BR')} boletos`;
+    const kpisR = [
+      { label: 'Total em boletos', value: brl(tt.all.value), detail: qtd(tt.all.count) },
+      { label: 'Pagos', value: brl(tt.PAGO.value), detail: `${qtd(tt.PAGO.count)} · ${pct(tt.PAGO.value).toLocaleString('pt-BR')}%` },
+      { label: 'Em aberto', value: brl(tt.A_VENCER.value + tt.VENCIDO.value), detail: qtd(tt.A_VENCER.count + tt.VENCIDO.count) },
+      { label: 'À vencer', value: brl(tt.A_VENCER.value), detail: qtd(tt.A_VENCER.count) },
+      { label: 'Vencidos', value: brl(tt.VENCIDO.value), detail: qtd(tt.VENCIDO.count) },
+      { label: 'Vencem em 30 dias', value: brl(d.next30.value), detail: qtd(d.next30.count) },
+      { label: 'Valor médio por boleto', value: brl(tt.all.count ? tt.all.value / tt.all.count : 0) },
+    ];
+    return {
+      title: 'Dashboard de Boletos',
+      filtros: filtrosTexto(),
+      kpis: kpisR,
+      charts: [],
+      tables,
+      boletos,
+      fileBase: `Dashboard-boletos-${ymd(new Date())}`,
+    };
+  };
+
+  /** Fotografa os gráficos da tela (tema claro, para impressão). */
+  const capturarGraficos = async (): Promise<DashReportChart[]> => {
+    const root = chartsRef.current;
+    if (!root) return [];
+    const voltarEscuro = isDark;
+    if (voltarEscuro) {
+      toggleTheme();
+      await new Promise((r) => setTimeout(r, 1200));
+    }
+    try {
+      const nodes = Array.from(root.querySelectorAll<HTMLElement>('[data-export-chart]'));
+      const out: DashReportChart[] = [];
+      for (const node of nodes) {
+        const rect = node.getBoundingClientRect();
+        if (rect.width < 10 || rect.height < 10) continue;
+        const dataUrl = await toPng(node, { backgroundColor: '#ffffff', pixelRatio: 2, cacheBust: true });
+        out.push({ title: node.dataset.exportChart || '', dataUrl, widthPx: rect.width, heightPx: rect.height });
+      }
+      return out;
+    } finally {
+      if (voltarEscuro) toggleTheme();
+    }
+  };
+
+  const exportar = async (tipo: 'pdf' | 'excel') => {
+    setExportando(tipo);
+    try {
+      const rel = await montarRelatorio();
+      if (tipo === 'pdf') {
+        rel.charts = await capturarGraficos();
+        await exportDashboardBoletosPdf(rel);
+      } else {
+        await exportDashboardBoletosExcel(rel);
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Não foi possível gerar o relatório.');
+    } finally {
+      setExportando(null);
+    }
+  };
 
   if (!user) {
     return (
@@ -838,16 +1085,105 @@ function DashboardBoletosPage() {
           description="Indicadores de pagos, à vencer e vencidos por polo, gestor, centro de custo e mês de vencimento"
         />
 
+        <Card className={cadastroListClasses.card}>
+          <CardHeader className={cadastroListClasses.cardHeader}>
+            <div className={cadastroListClasses.cardHeaderRow}>
+              <SectionTitle icon={ListFilter} title="Filtros" subtitle="Período de vencimento, situação, centro de custo, polo, gestor e fornecedor" />
+              <div className="flex flex-wrap items-center gap-2">
+                {filtersActive ? (
+                  <button
+                    type="button"
+                    onClick={() => setFilters(EMPTY_FILTERS)}
+                    className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+                  >
+                    <FilterX className="h-4 w-4 shrink-0" />
+                    <span>Limpar filtros</span>
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => void exportar('excel')}
+                  disabled={!!exportando || isLoading}
+                  className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+                  title="Exportar relatório em Excel (com os filtros aplicados)"
+                >
+                  {exportando === 'excel' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                  Excel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void exportar('pdf')}
+                  disabled={!!exportando || isLoading}
+                  className="flex h-10 items-center gap-2 rounded-lg bg-red-600 px-3 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:opacity-60"
+                  title="Exportar relatório em PDF, com gráficos (com os filtros aplicados)"
+                >
+                  {exportando === 'pdf' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+                  {exportando === 'pdf' ? 'Gerando PDF...' : 'PDF'}
+                </button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className={cadastroListClasses.cardContent}>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <FilterField label="Período (vencimento)">
+                <StringSingleSelectDropdown
+                  value={filters.periodo}
+                  onChange={escolherPeriodo}
+                  options={PERIODOS.map((p) => ({ value: p.value, label: p.label }))}
+                  placeholder="Todo o período"
+                  emptyOptionLabel="Todo o período"
+                  allowEmpty
+                  disableSearch
+                  matchTriggerWidth
+                />
+              </FilterField>
+              <FilterField label="Vencimento de">
+                <DatePickerField value={filters.dueFrom} onChange={setData('dueFrom')} placeholder="dd/mm/aaaa" aria-label="Vencimento a partir de" />
+              </FilterField>
+              <FilterField label="Vencimento até">
+                <DatePickerField value={filters.dueTo} onChange={setData('dueTo')} placeholder="dd/mm/aaaa" aria-label="Vencimento até" />
+              </FilterField>
+              <FilterField label="Situação">
+                <StringSingleSelectDropdown
+                  value={filters.status}
+                  onChange={(v) => setFilters((p) => ({ ...p, status: v }))}
+                  options={STATUS_OPCOES}
+                  placeholder="Todas"
+                  emptyOptionLabel="Todas"
+                  allowEmpty
+                  disableSearch
+                  matchTriggerWidth
+                />
+              </FilterField>
+              <FilterField label="Centro de custo">
+                <MultiSelectSearchDropdown options={opt(options?.costCenters)} selected={filters.costCenter} onChange={setLista('costCenter')} placeholder="Todos" searchPlaceholder="Pesquisar centro de custo..." listMaxHeight={320} noFocusRing />
+              </FilterField>
+              <FilterField label="Polo">
+                <MultiSelectSearchDropdown options={opt(options?.polos)} selected={filters.polo} onChange={setLista('polo')} placeholder="Todos" searchPlaceholder="Pesquisar polo..." listMaxHeight={320} noFocusRing />
+              </FilterField>
+              <FilterField label="Gestor">
+                <MultiSelectSearchDropdown options={opt(options?.managers)} selected={filters.manager} onChange={setLista('manager')} placeholder="Todos" searchPlaceholder="Pesquisar gestor..." listMaxHeight={320} noFocusRing />
+              </FilterField>
+              <FilterField label="Fornecedor">
+                <MultiSelectSearchDropdown options={opt(options?.suppliers)} selected={filters.supplier} onChange={setLista('supplier')} placeholder="Todos" searchPlaceholder="Pesquisar fornecedor..." listMaxHeight={320} noFocusRing />
+              </FilterField>
+            </div>
+          </CardContent>
+        </Card>
+
+        <div ref={chartsRef} className="flex flex-col gap-6">
         {!isError ? (
           <div className="grid grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-3">
-            <div className="h-full lg:col-span-2">
+            <div className="h-full lg:col-span-2" data-export-chart="Total em boletos por mês de vencimento">
               <TotalAreaCard
                 total={t?.all.value ?? 0}
                 paidPct={t && t.all.value > 0 ? (t.PAGO.value / t.all.value) * 100 : 0}
                 byMonth={data?.byMonth ?? []}
               />
             </div>
-            <PaidGaugeCard paid={t?.PAGO.value ?? 0} total={t?.all.value ?? 0} />
+            <div className="h-full" data-export-chart="Progresso de pagamento">
+              <PaidGaugeCard paid={t?.PAGO.value ?? 0} total={t?.all.value ?? 0} />
+            </div>
           </div>
         ) : null}
 
@@ -868,64 +1204,6 @@ function DashboardBoletosPage() {
           ))}
         </div>
 
-        <div className="flex items-center justify-end gap-2">
-          <div className={cadastroListClasses.filterIconButtonWrap}>
-            <button
-              type="button"
-              onClick={() => setShowFilters((p) => !p)}
-              className={`${cadastroListClasses.filterIconButton} transition-colors ${
-                showFilters || filtersActive
-                  ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
-                  : 'border-gray-300 bg-white text-gray-800 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700'
-              }`}
-              aria-expanded={showFilters}
-              aria-label="Abrir filtros"
-              title={filtersActive ? 'Filtros ativos' : 'Filtros'}
-            >
-              <Filter className="h-4 w-4" />
-              {filtersActive ? <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" /> : null}
-            </button>
-          </div>
-        </div>
-
-        {showFilters ? (
-          <Card className={cadastroListClasses.card}>
-            <CardHeader className={cadastroListClasses.cardHeader}>
-              <div className={cadastroListClasses.cardHeaderRow}>
-                <SectionTitle icon={ListFilter} title="Filtros" subtitle="Recorte os indicadores por polo, centro de custo, gestor e período de vencimento" />
-                {filtersActive ? (
-                  <button
-                    type="button"
-                    onClick={() => setFilters(EMPTY_FILTERS)}
-                    className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
-                  >
-                    <FilterX className="h-4 w-4 shrink-0" />
-                    <span>Limpar filtros</span>
-                  </button>
-                ) : null}
-              </div>
-            </CardHeader>
-            <CardContent className={cadastroListClasses.cardContent}>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
-                <FilterField label="Polo">
-                  <StringSingleSelectDropdown value={filters.polo} onChange={setFilter('polo')} options={options?.polos ?? []} placeholder="Todos" emptyOptionLabel="Todos" matchTriggerWidth />
-                </FilterField>
-                <FilterField label="Centro de custo">
-                  <StringSingleSelectDropdown value={filters.costCenter} onChange={setFilter('costCenter')} options={options?.costCenters ?? []} placeholder="Todos" emptyOptionLabel="Todos" matchTriggerWidth />
-                </FilterField>
-                <FilterField label="Gestor">
-                  <StringSingleSelectDropdown value={filters.manager} onChange={setFilter('manager')} options={options?.managers ?? []} placeholder="Todos" emptyOptionLabel="Todos" matchTriggerWidth />
-                </FilterField>
-                <FilterField label="Vencimento de">
-                  <DatePickerField value={filters.dueFrom} onChange={setFilter('dueFrom')} placeholder="dd/mm/aaaa" aria-label="Vencimento a partir de" />
-                </FilterField>
-                <FilterField label="Vencimento até">
-                  <DatePickerField value={filters.dueTo} onChange={setFilter('dueTo')} placeholder="dd/mm/aaaa" aria-label="Vencimento até" />
-                </FilterField>
-              </div>
-            </CardContent>
-          </Card>
-        ) : null}
 
         {isLoading ? (
           <Loading message="Carregando indicadores..." size="lg" />
@@ -935,7 +1213,7 @@ function DashboardBoletosPage() {
           </Card>
         ) : (
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <ChartCard icon={CalendarRange} title="Valor por mês de vencimento" iconBg="bg-sky-100 dark:bg-sky-900/30" iconColor="text-sky-600 dark:text-sky-400" subtitle="Pago, à vencer e vencido" className="lg:col-span-2">
+            <ChartCard exportChart="Valor por mês de vencimento" icon={CalendarRange} title="Valor por mês de vencimento" iconBg="bg-sky-100 dark:bg-sky-900/30" iconColor="text-sky-600 dark:text-sky-400" subtitle="Pago, à vencer e vencido" className="lg:col-span-2">
               <MonthlyChart data={data.byMonth} />
             </ChartCard>
 
@@ -943,27 +1221,27 @@ function DashboardBoletosPage() {
               <MonthlySummaryTable rows={data.byMonthPolo ?? []} polos={data.byPolo.map((p) => p.label)} />
             </ChartCard>
 
-            <ChartCard icon={CreditCard} title="Total por tipo de pagamento" iconBg="bg-amber-100 dark:bg-amber-900/30" iconColor="text-amber-600 dark:text-amber-400" subtitle="Classificado pela condição de pagamento" className="lg:col-span-2">
+            <ChartCard exportChart="Total por tipo de pagamento" icon={CreditCard} title="Total por tipo de pagamento" iconBg="bg-amber-100 dark:bg-amber-900/30" iconColor="text-amber-600 dark:text-amber-400" subtitle="Classificado pela condição de pagamento" className="lg:col-span-2">
               <PaymentTypeBlock data={data.byPaymentType ?? []} />
             </ChartCard>
 
-            <ChartCard icon={ReceiptText} title="Principais condições de pagamento" iconBg="bg-teal-100 dark:bg-teal-900/30" iconColor="text-teal-600 dark:text-teal-400" subtitle="8 maiores por valor" className="lg:col-span-2">
+            <ChartCard exportChart="Principais condições de pagamento" icon={ReceiptText} title="Principais condições de pagamento" iconBg="bg-teal-100 dark:bg-teal-900/30" iconColor="text-teal-600 dark:text-teal-400" subtitle="8 maiores por valor" className="lg:col-span-2">
               <ConditionBlock data={data.byCondition ?? []} total={data.totals.all.value} />
             </ChartCard>
 
-            <ChartCard icon={Banknote} title="Valor por polo" iconBg="bg-rose-100 dark:bg-rose-900/30" iconColor="text-rose-600 dark:text-rose-400" subtitle="Distribuição do valor total">
+            <ChartCard exportChart="Valor por polo" icon={Banknote} title="Valor por polo" iconBg="bg-rose-100 dark:bg-rose-900/30" iconColor="text-rose-600 dark:text-rose-400" subtitle="Distribuição do valor total">
               <DonutChart data={data.byPolo} icon={Banknote} />
             </ChartCard>
 
-            <ChartCard icon={UserCog} title="Valor por gestor" iconBg="bg-violet-100 dark:bg-violet-900/30" iconColor="text-violet-600 dark:text-violet-400" subtitle="Centros de custo agrupados pelo gestor do contrato">
+            <ChartCard exportChart="Valor por gestor" icon={UserCog} title="Valor por gestor" iconBg="bg-violet-100 dark:bg-violet-900/30" iconColor="text-violet-600 dark:text-violet-400" subtitle="Centros de custo agrupados pelo gestor do contrato">
               <RankBarChart data={data.byManager} icon={UserCog} />
             </ChartCard>
 
-            <ChartCard icon={Wallet} title="Valor por centro de custo" iconBg="bg-indigo-100 dark:bg-indigo-900/30" iconColor="text-indigo-600 dark:text-indigo-400" subtitle="10 maiores">
+            <ChartCard exportChart="Valor por centro de custo (10 maiores)" icon={Wallet} title="Valor por centro de custo" iconBg="bg-indigo-100 dark:bg-indigo-900/30" iconColor="text-indigo-600 dark:text-indigo-400" subtitle="10 maiores">
               <RankBarChart data={data.byCostCenter.slice(0, 10)} icon={Wallet} color="#1e40af" />
             </ChartCard>
 
-            <ChartCard icon={Truck} title="Valor por fornecedor" iconBg="bg-emerald-100 dark:bg-emerald-900/30" iconColor="text-emerald-600 dark:text-emerald-400" subtitle="10 maiores">
+            <ChartCard exportChart="Valor por fornecedor (10 maiores)" icon={Truck} title="Valor por fornecedor" iconBg="bg-emerald-100 dark:bg-emerald-900/30" iconColor="text-emerald-600 dark:text-emerald-400" subtitle="10 maiores">
               <RankBarChart data={data.bySupplier.slice(0, 10)} icon={Truck} color="#0f766e" />
             </ChartCard>
 
@@ -972,6 +1250,7 @@ function DashboardBoletosPage() {
             </ChartCard>
           </div>
         )}
+        </div>
       </PageStack>
     </MainLayout>
   );

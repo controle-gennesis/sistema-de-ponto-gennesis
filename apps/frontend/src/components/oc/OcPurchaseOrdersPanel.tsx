@@ -127,6 +127,7 @@ import {
 } from '@/components/oc/ocPaymentBoleto';
 import {
   purchaseOrderPhaseLabel,
+  purchaseOrderPhaseLabelForOrder,
   etapaFluigDaOc,
   type OcFluigFase,
 } from '@/components/oc/ocStatusLabels';
@@ -5923,7 +5924,34 @@ export function OcPurchaseOrdersPanel({
                     ? OC_PAYMENT_TYPE_LABELS[selectedOrder.paymentType] || selectedOrder.paymentType
                     : null;
 
+                  const etapaFluigSel = etapaFluigDaOc(selectedOrder);
+                  const statusBadgeSel = etapaFluigSel
+                    ? /finalizad/i.test(etapaFluigSel)
+                      ? STATUS_COLORS.FINALIZED
+                      : selectedOrder.fluigFase?.fluxo === 'G4'
+                        ? STATUS_COLORS.APPROVED
+                        : STATUS_COLORS.PENDING
+                    : isSelectedOcTotvsNaoEnviada
+                      ? STATUS_COLORS.DRAFT
+                      : STATUS_COLORS[selectedOrder.status] || STATUS_COLORS.DRAFT;
                   const infoRows: { label: string; value: React.ReactNode; stacked?: boolean }[] = [
+                    {
+                      label: 'Status',
+                      value: (
+                        <span className="text-right">
+                          <span className={`inline-flex rounded px-2 py-0.5 text-xs font-semibold ${statusBadgeSel}`}>
+                            {isSelectedOcTotvsNaoEnviada && !etapaFluigSel
+                              ? 'Aguardando envio ao TOTVS'
+                              : purchaseOrderPhaseLabelForOrder(selectedOrder)}
+                          </span>
+                          {etapaFluigSel ? (
+                            <span className="block text-xs font-normal text-gray-500 dark:text-gray-400">
+                              {selectedOrder.fluigFase?.fluxo === 'G4' ? 'Fluig G4 — pagamento' : 'Fluig G3 — aprovação da OC'}
+                            </span>
+                          ) : null}
+                        </span>
+                      )
+                    },
                     {
                       label: 'RM',
                       value: (() => {

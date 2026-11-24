@@ -952,7 +952,14 @@ export class TotvsRmRelatorioFinService {
     return rows;
   }
 
-  async fetchRowsForPath(pathRel: string): Promise<Record<string, unknown>[]> {
+  /**
+   * `auth`: login próprio para esta consulta (ex.: Prévia da Folha usa TOTVS_RM_FOLPAG_*);
+   * sem ele, vale o usuário de integração (TOTVS_RM_USER / TOTVS_RM_PASSWORD).
+   */
+  async fetchRowsForPath(
+    pathRel: string,
+    auth?: { user: string; password: string }
+  ): Promise<Record<string, unknown>[]> {
     const url = this.buildUrlFromPath(pathRel);
     const bearer = (process.env.TOTVS_RM_BEARER_TOKEN || '').trim();
     const rejectUnauthorized =
@@ -964,7 +971,9 @@ export class TotvsRmRelatorioFinService {
       Accept: 'application/json',
       'Content-Type': 'application/json'
     };
-    if (bearer) {
+    if (auth?.user && auth.password) {
+      headers.Authorization = `Basic ${Buffer.from(`${auth.user}:${auth.password}`, 'utf8').toString('base64')}`;
+    } else if (bearer) {
       headers.Authorization = `Bearer ${bearer}`;
     } else {
       const basic = this.authHeader();

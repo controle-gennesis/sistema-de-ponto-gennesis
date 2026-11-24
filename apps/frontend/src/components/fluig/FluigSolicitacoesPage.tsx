@@ -1431,7 +1431,10 @@ export function FluigSolicitacoesPage({
     const s = rawStatus.trim();
 
     if (datasetId === 'DataSet_G3FollowUp') {
-      // Às vezes o espelho traz só o número da atividade do G3 (sem nome): 4 = Aprovação da Diretoria.
+      // Às vezes o espelho traz só o número da atividade do G3 (sem nome): 2 = Setor Técnico, 4 = Diretoria.
+      if (/^(Etapa\s*)?2$/i.test(s)) {
+        return { key: 'G3_APROVACAO_SETOR_TECNICO', label: 'Aprovação do Setor Técnico' };
+      }
       if (/^(Etapa\s*)?4$/i.test(s)) {
         return { key: 'G3_APROVACAO_DIRETORIA', label: 'Aprovação da Diretoria' };
       }

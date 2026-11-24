@@ -160,6 +160,25 @@ async function ensureMaterialRequestObservacaoSolicitante(prisma: PrismaClient):
   `);
 }
 
+/** Prévia da Folha (Métricas): cópia da última leitura da consulta FOLPAG (somente consulta). */
+async function ensureMetricasPreviaFolhaSnapshot(prisma: PrismaClient): Promise<void> {
+  if (await tableExists(prisma, 'metricas_previa_folha_snapshot')) return;
+  console.warn('[Schema] Tabela metricas_previa_folha_snapshot ausente — criando.');
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "metricas_previa_folha_snapshot" (
+      "id" TEXT NOT NULL,
+      "fetchedAt" TIMESTAMP(3),
+      "trigger" TEXT,
+      "fetchedByName" TEXT,
+      "rows" JSONB NOT NULL DEFAULT '[]'::jsonb,
+      "rowCount" INTEGER NOT NULL DEFAULT 0,
+      "lastError" TEXT,
+      "lastErrorAt" TIMESTAMP(3),
+      CONSTRAINT "metricas_previa_folha_snapshot_pkey" PRIMARY KEY ("id")
+    );
+  `);
+}
+
 async function ensureMaterialRequestItemCorrectionReviews(prisma: PrismaClient): Promise<void> {
   if (await tableExists(prisma, 'material_request_item_correction_reviews')) return;
   console.warn('[Schema] Tabela material_request_item_correction_reviews ausente — criando.');
@@ -3613,6 +3632,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureMaterialRequestItemCorrectionReviews(prisma);
     await ensurePaymentConditionFromTotvs(prisma);
     await ensureMaterialRequestObservacaoSolicitante(prisma);
+    await ensureMetricasPreviaFolhaSnapshot(prisma);
     await ensureMaterialRequestColumns(prisma);
     await ensureMaterialRequestItemColumns(prisma);
     await ensureMaterialRequestCommentsTable(prisma);

@@ -905,6 +905,7 @@ export function useRoutePermission(route: string) {
     // key estável (legado `ponto_metricas_ocs-boleto-pix`) — rota atualizada sem invalidar permissões no banco
     '/ponto/metricas/pagamentos-ocs':
       isAdministrator || can(pk('/ponto/metricas/ocs-boleto-pix')),
+    '/ponto/metricas/previa-folha': isAdministrator || can(pk('/ponto/metricas/previa-folha')),
     '/ponto/pleitos-gerados': isAdministrator || can(pk('/ponto/pleitos-gerados')),
     '/ponto/aprovacao-fds': isAdministrator || can(pk('/ponto/aprovacao-fds')),
     '/ponto/cronogramas': isAdministrator || can(pk('/ponto/cronogramas')),

@@ -41,6 +41,8 @@ function acharColuna(keys: string[], padroes: RegExp[]): string | null {
 /** Mesmos rótulos da tela Gestão de Solicitações (Fluig). */
 function rotuloEtapaG3(bruto: string): string {
   // Às vezes o espelho traz só o número da atividade do G3 (sem nome).
+  // Atividades do G3 no Fluig: 2 = Setor Técnico, 4 = Diretoria.
+  if (/^\s*(Etapa\s*)?2\s*$/i.test(bruto)) return 'Aprovação do Setor Técnico';
   if (/^\s*(Etapa\s*)?4\s*$/i.test(bruto)) return 'Aprovação da Diretoria';
   if (/Etapa\s*108\b/i.test(bruto)) return 'Análise Controladoria';
   if (/Etapa\s*117\b/i.test(bruto)) return 'Validação de Frete';
@@ -54,6 +56,8 @@ function rotuloEtapaG3(bruto: string): string {
   if (/recotacao/.test(l)) return 'Recotação';
   if (/finalizada/.test(l)) return 'Finalizada';
   if (/frete/.test(l)) return 'Validação de Frete';
+  // Número de atividade ainda sem nome conhecido: não mostra o número solto.
+  if (/^\s*\d+\s*$/.test(bruto)) return `Etapa ${bruto.trim()} do Fluig`;
   return bruto;
 }
 
@@ -64,6 +68,7 @@ function rotuloEtapaG4(bruto: string): string {
   if (l.includes('nota fiscal')) return 'Anexar Nota Fiscal';
   if (l.includes('validacao')) return 'Validação Compras';
   if (l.includes('comprovante')) return 'Anexar Comprovante';
+  if (/^\s*\d+\s*$/.test(bruto)) return `Etapa ${bruto.trim()} do Fluig`;
   return bruto;
 }
 

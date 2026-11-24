@@ -1267,6 +1267,14 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             description: 'Ordens de compra do TOTVS (consulta OCSBOLETOPIX)',
             permission: isAdministrator || can(pk('/ponto/metricas/ocs-boleto-pix'))
           },
+          {
+            name: 'Prévia da Folha',
+            section: 'Financeiro',
+            href: '/ponto/metricas/previa-folha',
+            icon: Wallet,
+            description: 'Folha do TOTVS (consulta FOLPAG) — somente leitura',
+            permission: isAdministrator || can(pk('/ponto/metricas/previa-folha'))
+          },
         ]
       },
       {

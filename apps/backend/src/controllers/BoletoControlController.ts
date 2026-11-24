@@ -89,9 +89,11 @@ function str(v: unknown): string | null {
 
 type Filters = {
   search?: string;
-  polo?: string;
-  costCenter?: string;
-  manager?: string;
+  /** Polo, centro de custo, gestor e fornecedor aceitam vários valores (?polo=a&polo=b). */
+  polo?: string[];
+  costCenter?: string[];
+  manager?: string[];
+  supplier?: string[];
   technical?: string; // SIM | NAO
   dueFrom?: string;
   dueTo?: string;
@@ -100,11 +102,20 @@ type Filters = {
 
 function readFilters(q: Record<string, unknown>): Filters {
   const pick = (k: string) => (typeof q[k] === 'string' && (q[k] as string).trim() ? (q[k] as string).trim() : undefined);
+  const pickList = (k: string): string[] | undefined => {
+    const raw = q[k] ?? q[`${k}[]`];
+    const list = (Array.isArray(raw) ? raw : [raw])
+      .filter((v): v is string => typeof v === 'string')
+      .map((v) => v.trim())
+      .filter(Boolean);
+    return list.length ? Array.from(new Set(list)) : undefined;
+  };
   return {
     search: pick('search'),
-    polo: pick('polo'),
-    costCenter: pick('costCenter'),
-    manager: pick('manager'),
+    polo: pickList('polo'),
+    costCenter: pickList('costCenter'),
+    manager: pickList('manager'),
+    supplier: pickList('supplier'),
     technical: pick('technical'),
     dueFrom: pick('dueFrom'),
     dueTo: pick('dueTo'),
@@ -133,15 +144,18 @@ function baseWhere(f: Filters, managers: Map<string, string>): Prisma.BoletoCont
       ],
     });
   }
-  if (f.polo) and.push({ polo: f.polo });
-  if (f.costCenter) and.push({ costCenterName: f.costCenter });
-  if (f.manager) {
-    if (f.manager === NO_MANAGER) {
-      and.push({ OR: [{ costCenterName: null }, { costCenterName: { notIn: [...managers.keys()] } }] });
-    } else {
-      const centers = [...managers.entries()].filter(([, m]) => m === f.manager).map(([c]) => c);
-      and.push({ costCenterName: { in: centers.length ? centers : ['__nenhum__'] } });
+  if (f.polo?.length) and.push({ polo: { in: f.polo } });
+  if (f.costCenter?.length) and.push({ costCenterName: { in: f.costCenter } });
+  if (f.supplier?.length) and.push({ supplierName: { in: f.supplier } });
+  if (f.manager?.length) {
+    const escolhidos = new Set(f.manager);
+    const or: Prisma.BoletoControlEntryWhereInput[] = [];
+    if (escolhidos.has(NO_MANAGER)) {
+      or.push({ costCenterName: null }, { costCenterName: { notIn: [...managers.keys()] } });
     }
+    const centers = [...managers.entries()].filter(([, m]) => escolhidos.has(m)).map(([c]) => c);
+    if (centers.length) or.push({ costCenterName: { in: centers } });
+    and.push(or.length ? { OR: or } : { costCenterName: { in: ['__nenhum__'] } });
   }
   if (f.technical === 'SIM') and.push({ technicalConfirmed: true });
   if (f.technical === 'NAO') and.push({ technicalConfirmed: false });
@@ -256,12 +270,18 @@ export class BoletoControlController {
   async dashboard(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const f = readFilters(req.query);
+      // ?export=1: listas completas (sem cortes de top N) e a lista de boletos, para o PDF/Excel.
+      const exportar = req.query.export === '1' || req.query.export === 'true';
       const today = todayBrasilia();
       const managers = await loadManagerMap();
+      const and = baseWhere(f, managers);
+      const stWhere = statusWhere(f.status, today);
       const rows = await prisma.boletoControlEntry.findMany({
-        where: { AND: baseWhere(f, managers) },
+        where: { AND: stWhere ? [...and, stWhere] : and },
+        orderBy: [{ dueDate: 'asc' }, { supplierName: 'asc' }],
         select: {
           id: true,
+          idMov: true,
           polo: true,
           supplierName: true,
           costCenterName: true,
@@ -316,7 +336,7 @@ export class BoletoControlController {
         addToBucket(bySupplier, r.supplierName || '—', r.supplierName || 'Sem fornecedor', status, value);
         const ym = r.dueDate ? r.dueDate.toISOString().slice(0, 7) : 'sem-data';
         addToBucket(byMonth, ym, ym, status, value);
-        const cond = (r.paymentCondition ?? '').replace(/s+/g, ' ').trim().toUpperCase() || 'NÃO INFORMADO';
+        const cond = (r.paymentCondition ?? '').replace(/\s+/g, ' ').trim().toUpperCase() || 'NÃO INFORMADO';
         addToBucket(byCondition, cond, cond, status, value);
         const mp = monthPolo.get(ym) ?? {};
         const pk = r.polo || 'Sem polo';
@@ -365,7 +385,7 @@ export class BoletoControlController {
           byPolo: finish(byPolo, 'value'),
           byManager: finish(byManager, 'value'),
           byCostCenter: finish(byCostCenter, 'value'),
-          bySupplier: finish(bySupplier, 'value').slice(0, 15),
+          bySupplier: exportar ? finish(bySupplier, 'value') : finish(bySupplier, 'value').slice(0, 15),
           byMonth: finish(byMonth, 'key'),
           byMonthPolo: Array.from(monthPolo.entries())
             .sort(([a], [b]) => a.localeCompare(b))
@@ -373,10 +393,27 @@ export class BoletoControlController {
               key,
               polos: Object.fromEntries(Object.entries(polos).map(([p, v]) => [p, { value: round2(v.value), count: v.count }])),
             })),
-          byCondition: finish(byCondition, 'value').slice(0, 8),
+          byCondition: exportar ? finish(byCondition, 'value') : finish(byCondition, 'value').slice(0, 8),
           byPaymentType: PAYMENT_TYPES.map((p) => finish(new Map([[p, byPaymentType.get(p)!]]), 'key')[0]),
           overdue: overdue.slice(0, 10),
           overdueTotal: overdue.length,
+          ...(exportar
+            ? {
+                rows: rows.map((r) => ({
+                  supplierName: r.supplierName,
+                  ocNumber: r.ocNumber,
+                  idMov: r.idMov,
+                  nfNumber: r.nfNumber,
+                  costCenterName: r.costCenterName,
+                  manager: managerOf(managers, r.costCenterName),
+                  polo: r.polo,
+                  paymentCondition: r.paymentCondition,
+                  value: r.value == null ? 0 : round2(Number(r.value)),
+                  dueDate: r.dueDate ? r.dueDate.toISOString().slice(0, 10) : null,
+                  status: effectiveStatus(r, today),
+                })),
+              }
+            : {}),
         },
       });
     } catch (error) {
@@ -444,7 +481,7 @@ export class BoletoControlController {
 
   async options(_req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const distinct = async (field: 'polo' | 'costCenterName') => {
+      const distinct = async (field: 'polo' | 'costCenterName' | 'supplierName') => {
         const rows = await prisma.boletoControlEntry.findMany({
           where: { [field]: { not: null } },
           distinct: [field],
@@ -465,11 +502,12 @@ export class BoletoControlController {
         if (!p.polo || !p.costCenterName) continue;
         (costCentersByPolo[p.polo] ||= []).push(p.costCenterName);
       }
-      const [polos, costCenters, managerRows, official] = await Promise.all([
+      const [polos, costCenters, managerRows, official, suppliers] = await Promise.all([
         distinct('polo'),
         distinct('costCenterName'),
         prisma.boletoControlManager.findMany({ select: { managerName: true } }),
         prisma.costCenter.findMany({ where: { isActive: true }, select: { name: true }, orderBy: { name: 'asc' } }),
+        distinct('supplierName'),
       ]);
       const mapped = new Set((await loadManagerMap()).keys());
       const hasUnmapped = costCenters.some((c) => !mapped.has(c));
@@ -482,6 +520,7 @@ export class BoletoControlController {
           costCentersByPolo,
           managers: hasUnmapped ? [...managers, NO_MANAGER] : managers,
           officialCostCenters: Array.from(new Set(official.map((c) => c.name))),
+          suppliers,
         },
       });
     } catch (error) {

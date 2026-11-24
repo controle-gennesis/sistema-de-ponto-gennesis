@@ -151,6 +151,8 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   { key: pathToModuleKey('/ponto/metricas/relatorios-contrato'), name: 'Relatórios de Contrato', href: '/ponto/metricas/relatorios-contrato', category: 'Métricas' },
   // key estável (legado `ponto_metricas_ocs-boleto-pix`) — href atualizado sem invalidar permissões no banco
   { key: pathToModuleKey('/ponto/metricas/ocs-boleto-pix'), name: 'Pagamentos de OCs', href: '/ponto/metricas/pagamentos-ocs', category: 'Métricas' },
+  // Somente consulta da folha do TOTVS (FOLPAG) — dados sensíveis: liberar só a quem precisa.
+  { key: pathToModuleKey('/ponto/metricas/previa-folha'), name: 'Prévia da Folha', href: '/ponto/metricas/previa-folha', category: 'Métricas' },
   { key: pathToModuleKey('/ponto/andamento-da-os'), name: 'Ordem de Serviço', href: '/ponto/andamento-da-os', category: 'Engenharia' },
   { key: pathToModuleKey('/ponto/sistema-gestao-os'), name: 'Central de Chamados', href: '/ponto/sistema-gestao-os', category: 'Engenharia' },
   {

@@ -81,6 +81,7 @@ import boletoControlRoutes from './routes/boletoControl';
 import contractRegistryRoutes from './routes/contractRegistry';
 import extratoCaixaRoutes from './routes/extratoCaixa';
 import ocsBoletoPixRoutes from './routes/ocsBoletoPix';
+import previaFolhaRoutes from './routes/previaFolha';
 import controleNfsRoutes from './routes/controleNfs';
 import nfeRecebidasRoutes from './routes/nfeRecebidas';
 import controleGeralRoutes from './routes/controleGeral';
@@ -142,6 +143,7 @@ import { startGoogleCalendarWatchScheduler } from './services/googleCalendarWatc
 import { startFuelRefuelEveningCheckScheduler } from './services/FuelRefuelEveningCheckScheduler';
 import { startVehicleReservationBaixaReminderScheduler } from './services/VehicleReservationBaixaReminderScheduler';
 import { startSupplierTotvsSyncScheduler } from './services/SupplierTotvsSyncService';
+import { startPreviaFolhaScheduler } from './services/PreviaFolhaService';
 import { startMaterialTotvsSyncScheduler } from './services/MaterialTotvsSyncService';
 import { startStockLocationTotvsSyncScheduler } from './services/StockLocationTotvsSync';
 import { startPaymentConditionTotvsSyncScheduler } from './services/PaymentConditionTotvsSync';
@@ -503,6 +505,8 @@ app.use('/api/boleto-control', boletoControlRoutes);
 app.use('/api/contract-registry', contractRegistryRoutes);
 app.use('/api/extrato-caixa', extratoCaixaRoutes);
 app.use('/api/ocs-boleto-pix', ocsBoletoPixRoutes);
+/** Prévia da Folha (Métricas) — somente consulta à FOLPAG do TOTVS. */
+app.use('/api/metricas/previa-folha', previaFolhaRoutes);
 app.use('/api/controle-nfs', controleNfsRoutes);
 app.use('/api/nfe-recebidas', nfeRecebidasRoutes);
 /** Teto orçamentário mensal (Controle Geral de Contratos). */
@@ -866,6 +870,12 @@ try {
         startSupplierTotvsSyncScheduler();
       } catch (e) {
         console.error('[supplier-totvs] falha ao agendar:', e);
+      }
+
+      try {
+        startPreviaFolhaScheduler();
+      } catch (e) {
+        console.error('[previa-folha] falha ao agendar:', e);
       }
 
       try {
