@@ -478,16 +478,17 @@ const getStyles = (colors: any, isDark: boolean) =>
       paddingTop: 12,
       paddingBottom: 6,
       borderRadius: 28,
-      backgroundColor: isDark ? 'rgba(206,55,54,0.16)' : 'rgba(206,55,54,0.08)',
+      // Escuro: cinza claro translúcido (o vermelho sobre fundo azulado ficava barrento).
+      backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(206,55,54,0.08)',
     },
-    dayName: { fontSize: 12, fontWeight: '500', color: colors.textSecondary, marginBottom: 8 },
+    dayName: { fontSize: 12, fontWeight: '500', color: isDark ? 'rgba(255,255,255,0.62)' : colors.textSecondary, marginBottom: 8 },
     dayCircle: {
       width: 34,
       height: 34,
       borderRadius: 17,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: isDark ? '#1f2937' : '#ffffff',
+      backgroundColor: isDark ? 'rgba(255,255,255,0.16)' : '#ffffff',
     },
     // Selecionado: bolinha no vermelho padrão do app.
     dayCircleSel: { backgroundColor: colors.primary },
