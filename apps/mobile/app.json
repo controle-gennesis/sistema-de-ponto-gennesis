@@ -27,7 +27,7 @@
       "buildNumber": "2"
     },
     "android": {
-      "versionCode": 21,
+      "versionCode": 22,
       "icon": "./assets/logo-android.png",
       "adaptiveIcon": {
         "foregroundImage": "./assets/logo-android.png",
