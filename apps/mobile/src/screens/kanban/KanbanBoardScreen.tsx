@@ -29,6 +29,7 @@ import {
   ListChecks,
   Calendar,
   LayoutGrid,
+  Search,
   X,
 } from 'lucide-react-native';
 import Svg, { Circle, Defs, LinearGradient as SvgLinearGradient, Rect, Stop } from 'react-native-svg';
@@ -47,6 +48,7 @@ import { useKanbanCollab, type KanbanPresence } from '../../lib/kanbanCollab';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { resolveKanbanDefaultBoard } from '../../lib/kanbanDefaultBoard';
+import { coverHex, normalizeCoverSize } from '../../lib/kanbanCover';
 import {
   createKanbanCard,
   createKanbanColumn,
@@ -55,6 +57,7 @@ import {
   updateKanbanCard,
   type KanbanBoard,
   type KanbanCard,
+  type KanbanBoardSummary,
   type KanbanColumn,
   type Priority,
 } from '../../services/kanban';
@@ -290,20 +293,27 @@ function BoardCardBase({
   const priority = card.priority || 'medium';
   const priorityCfg = PRIORITY_CONFIG[priority] || PRIORITY_CONFIG.medium;
   const mutedBar = isDark ? '#4b5563' : '#d1d5db';
-  const divider = isDark ? 'rgba(75,85,99,0.75)' : '#f3f4f6';
-  const metaColor = isDark ? '#d1d5db' : '#4b5563';
-  const softColor = isDark ? '#9ca3af' : '#6b7280';
+  const fullCover = !!coverHex(card.coverColor) && normalizeCoverSize(card.coverSize) === 'FULL';
+  const divider = fullCover ? 'rgba(255,255,255,0.35)' : isDark ? 'rgba(75,85,99,0.75)' : '#f3f4f6';
+  const metaColor = fullCover ? 'rgba(255,255,255,0.92)' : isDark ? '#d1d5db' : '#4b5563';
+  const softColor = fullCover ? 'rgba(255,255,255,0.92)' : isDark ? '#9ca3af' : '#6b7280';
   const isCompleted = Boolean(card.completedAt);
-  const titleColor = isCompleted
-    ? isDark
-      ? '#9ca3af'
-      : '#6b7280'
-    : colors.text;
+  const coverColorHex = coverHex(card.coverColor);
+  const coverFull = !!coverColorHex && normalizeCoverSize(card.coverSize) === 'FULL';
+  const coverStrip = !!coverColorHex && !coverFull;
+  const titleColor = coverFull
+    ? '#ffffff'
+    : isCompleted
+      ? isDark
+        ? '#9ca3af'
+        : '#6b7280'
+      : colors.text;
 
   return (
     <TouchableOpacity
       style={[
         styles.card,
+        coverFull && coverColorHex ? { backgroundColor: coverColorHex, borderColor: coverColorHex } : null,
         presence && presence.length > 0 ? { borderColor: presence[0].color, borderWidth: 2 } : null,
       ]}
       onPress={() => {
@@ -315,6 +325,9 @@ function BoardCardBase({
       }}
       activeOpacity={0.82}
     >
+      {coverStrip ? (
+        <View style={{ height: 34, backgroundColor: coverColorHex ?? undefined, marginHorizontal: -14, marginTop: -14, marginBottom: 10, borderTopLeftRadius: 15, borderTopRightRadius: 15 }} />
+      ) : null}
       {presence && presence.length > 0 ? (
         <View style={[styles.presenceTag, { backgroundColor: presence[0].color }]}>
           <Text style={styles.presenceTagText} numberOfLines={1}>
@@ -370,7 +383,7 @@ function BoardCardBase({
         </Text>
       </View>
 
-      {description ? (
+      {description && !coverFull ? (
         <Text style={styles.cardDescription} numberOfLines={2}>
           {description}
         </Text>
@@ -478,6 +491,8 @@ export default function KanbanBoardScreen() {
   const paramTitle = route.params?.title;
   const { user } = useAuth();
   const { colors, isDark } = useTheme();
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchText, setSearchText] = useState('');
   const [boardAreaH, setBoardAreaH] = useState(0);
   // A faixa de filtros fica dentro da área do quadro, em cima das colunas: a altura dela sai do espaço
   // das colunas, senão o fim de cada coluna é cortado.
@@ -629,6 +644,41 @@ export default function KanbanBoardScreen() {
     [navigation, board?.departmentKey, departmentKey],
   );
 
+  const boardsListQuery = useQuery({
+    queryKey: ['kanban-boards'],
+    queryFn: fetchKanbanBoards,
+    enabled: searchOpen,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const searchResults = useMemo(() => {
+    const norm = (v: string | null | undefined) =>
+      (v ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const q = norm(searchText.trim());
+    if (q.length < 2) {
+      return { cards: [] as Array<{ card: KanbanCard; columnTitle: string }>, boards: [] as KanbanBoardSummary[], total: 0 };
+    }
+    const cards: Array<{ card: KanbanCard; columnTitle: string; inTitle: boolean }> = [];
+    for (const col of board?.columns ?? []) {
+      for (const card of col.cards ?? []) {
+        const inTitle = norm(card.title).includes(q);
+        if (inTitle || norm(card.description).includes(q)) {
+          cards.push({ card, columnTitle: col.title, inTitle });
+        }
+      }
+    }
+    cards.sort((a, b) => Number(b.inTitle) - Number(a.inTitle));
+    const boards = (boardsListQuery.data ?? [])
+      .filter((b) => norm(b.department).includes(q) || norm(b.name).includes(q))
+      .slice(0, 4);
+    return { cards: cards.slice(0, 30), boards, total: cards.length };
+  }, [searchText, board?.columns, boardsListQuery.data]);
+
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false);
+    setSearchText('');
+  }, []);
+
   const openAddCard = useCallback((columnId: string) => {
     setNewTitle('');
     setAddColId(columnId);
@@ -764,6 +814,76 @@ export default function KanbanBoardScreen() {
         }
       />
 
+      <Modal visible={searchOpen} animationType="fade" onRequestClose={closeSearch}>
+        <View style={[styles.safe, { paddingTop: 48 }]}>
+          <View style={styles.searchBar}>
+            <Search size={18} color={colors.textSecondary} />
+            <TextInput
+              value={searchText}
+              onChangeText={setSearchText}
+              placeholder="Buscar cards e quadros"
+              placeholderTextColor={colors.textSecondary}
+              autoFocus
+              returnKeyType="search"
+              style={styles.searchInput}
+            />
+            <TouchableOpacity onPress={closeSearch} hitSlop={10}>
+              <Text style={styles.searchCancel}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 14, paddingBottom: 40 }}>
+            {searchText.trim().length < 2 ? (
+              <Text style={styles.searchHint}>Digite ao menos 2 letras.</Text>
+            ) : searchResults.cards.length === 0 && searchResults.boards.length === 0 ? (
+              <Text style={styles.searchHint}>Nada encontrado.</Text>
+            ) : null}
+            {searchResults.cards.length > 0 ? <Text style={styles.searchSection}>Cartões</Text> : null}
+            {searchResults.cards.map(({ card, columnTitle }) => {
+              const hex = coverHex(card.coverColor);
+              return (
+                <TouchableOpacity
+                  key={card.id}
+                  style={styles.searchRow}
+                  onPress={() => {
+                    closeSearch();
+                    openCard(card);
+                  }}
+                >
+                  <View style={[styles.searchSwatch, { backgroundColor: hex ?? colors.border }]}>
+                    <ListChecks size={14} color={hex ? '#fff' : colors.textSecondary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.searchTitle} numberOfLines={1}>{card.title?.trim() || 'Sem título'}</Text>
+                    <Text style={styles.searchSub} numberOfLines={1}>{displayTitle}: {columnTitle}</Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+            {searchResults.total > searchResults.cards.length ? (
+              <Text style={styles.searchHint}>e mais {searchResults.total - searchResults.cards.length} no quadro</Text>
+            ) : null}
+            {searchResults.boards.length > 0 ? <Text style={styles.searchSection}>Quadros</Text> : null}
+            {searchResults.boards.map((b) => (
+              <TouchableOpacity
+                key={b.id}
+                style={styles.searchRow}
+                onPress={() => {
+                  closeSearch();
+                  navigation.push('KanbanBoard', { departmentKey: b.departmentKey, title: b.department });
+                }}
+              >
+                <View style={[styles.searchSwatch, { backgroundColor: colors.primary }]}>
+                  <Text style={{ color: '#fff', fontWeight: '800', fontSize: 11 }}>
+                    {b.department.trim().slice(0, 1).toUpperCase()}
+                  </Text>
+                </View>
+                <Text style={[styles.searchTitle, { flex: 1 }]} numberOfLines={1}>{b.department}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      </Modal>
+
       {(resolvingDefault || (boardQuery.isLoading && !board)) ? (
         <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} />
       ) : (
@@ -772,6 +892,14 @@ export default function KanbanBoardScreen() {
           onLayout={(e) => setBoardAreaH(e.nativeEvent.layout.height)}
         >
           <View style={styles.filterBar} onLayout={(e) => setFilterBarH(e.nativeEvent.layout.height)}>
+            <TouchableOpacity
+              onPress={() => setSearchOpen(true)}
+              activeOpacity={0.75}
+              accessibilityLabel="Buscar"
+              style={styles.searchBtn}
+            >
+              <Search size={16} color={colors.textSecondary} strokeWidth={2.2} />
+            </TouchableOpacity>
             <ScrollView
               horizontal
               style={{ flex: 1 }}
@@ -1212,6 +1340,28 @@ function getStyles(colors: any, isDark: boolean, columnHeight: number) {
       justifyContent: 'center',
     },
     headerBtns: { flexDirection: 'row', alignItems: 'center' },
+    searchBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      marginHorizontal: 14,
+      marginBottom: 6,
+      paddingHorizontal: 12,
+      height: 44,
+      borderRadius: 12,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    searchBtn: { width: 34, height: 34, marginLeft: 12, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+    searchInput: { flex: 1, fontSize: 15, color: colors.text, paddingVertical: 0 },
+    searchCancel: { color: colors.primary, fontWeight: '700', fontSize: 13 },
+    searchHint: { color: colors.textSecondary, fontSize: 13, paddingVertical: 10, paddingHorizontal: 4 },
+    searchSection: { color: colors.textSecondary, fontSize: 11, fontWeight: '800', textTransform: 'uppercase', marginTop: 10, marginBottom: 6, paddingHorizontal: 4 },
+    searchRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, paddingHorizontal: 6, borderRadius: 10 },
+    searchSwatch: { width: 30, height: 24, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
+    searchTitle: { color: colors.text, fontSize: 14, fontWeight: '700' },
+    searchSub: { color: colors.textSecondary, fontSize: 12, marginTop: 1 },
     headerBtn: { width: 40, height: 44, alignItems: 'center', justifyContent: 'center' },
 
     titleRow: {

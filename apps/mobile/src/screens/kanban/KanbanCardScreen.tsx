@@ -30,6 +30,7 @@ import {
   Trash2,
   Send,
   Tag,
+  Palette,
   Calendar,
   Clock,
   Paperclip,
@@ -49,6 +50,7 @@ import { MemberAvatar, MemberPickerSheet } from '../../components/KanbanMemberUi
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { describeCardActivity } from '../../lib/kanbanActivity';
+import { coverHex, KANBAN_COVER_COLORS, normalizeCoverSize } from '../../lib/kanbanCover';
 import {
   addKanbanCardMember,
   addKanbanLinkAttachment,
@@ -212,6 +214,7 @@ export default function KanbanCardScreen() {
   const mentionPickedRef = useRef<Map<string, string>>(new Map());
   const [moveOpen, setMoveOpen] = useState(false);
   const [labelsOpen, setLabelsOpen] = useState(false);
+  const [coverOpen, setCoverOpen] = useState(false);
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkUrl, setLinkUrl] = useState('');
   const [linkName, setLinkName] = useState('');
@@ -386,6 +389,16 @@ export default function KanbanCardScreen() {
       Toast.show({ type: 'error', text1: e?.message || 'Falha ao salvar' });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const saveCover = async (coverColor: string | null, coverSize: 'NORMAL' | 'FULL') => {
+    if (!card || readOnly) return;
+    try {
+      await updateKanbanCard(card.id, { coverColor, coverSize });
+      await invalidate();
+    } catch (e: any) {
+      Toast.show({ type: 'error', text1: e?.message || 'Falha ao salvar capa' });
     }
   };
 
@@ -963,6 +976,18 @@ export default function KanbanCardScreen() {
             contentContainerStyle={styles.prioRow}
             style={styles.prioScroll}
           >
+            <TouchableOpacity
+              style={[styles.prioChip, styles.coverChip]}
+              onPress={() => setCoverOpen(true)}
+              disabled={readOnly}
+            >
+              {coverHex(card.coverColor) ? (
+                <View style={[styles.coverDot, { backgroundColor: coverHex(card.coverColor) ?? undefined }]} />
+              ) : (
+                <Palette size={13} color={colors.textSecondary} />
+              )}
+              <Text style={styles.prioText}>Capa</Text>
+            </TouchableOpacity>
             {PRIORITIES.map((p) => (
               <TouchableOpacity
                 key={p}
@@ -1579,6 +1604,56 @@ export default function KanbanCardScreen() {
       ) : null}
 
       <KanbanSheet
+        visible={coverOpen}
+        onClose={() => setCoverOpen(false)}
+        title="Capa"
+        subtitle="Dê uma cor ao card"
+        icon={Palette}
+      >
+        <View style={styles.coverGrid}>
+          {KANBAN_COVER_COLORS.map((c) => (
+            <TouchableOpacity
+              key={c.key}
+              style={[styles.coverSwatch, { backgroundColor: c.hex }, card.coverColor === c.key && styles.coverSwatchActive]}
+              onPress={() => void saveCover(c.key, normalizeCoverSize(card.coverSize))}
+              accessibilityLabel={c.label}
+            >
+              {card.coverColor === c.key ? <Check size={18} color="#fff" /> : null}
+            </TouchableOpacity>
+          ))}
+        </View>
+        {card.coverColor ? (
+          <>
+            <View style={styles.coverSizeRow}>
+              {(['NORMAL', 'FULL'] as const).map((sz) => (
+                <TouchableOpacity
+                  key={sz}
+                  style={[styles.prioChip, { flex: 1, alignItems: 'center' }, normalizeCoverSize(card.coverSize) === sz && styles.prioChipActive]}
+                  onPress={() => void saveCover(card.coverColor ?? null, sz)}
+                >
+                  <Text style={[styles.prioText, normalizeCoverSize(card.coverSize) === sz && styles.prioTextActive]}>
+                    {sz === 'NORMAL' ? 'Faixa' : 'Card inteiro'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TouchableOpacity
+              style={styles.coverRemove}
+              onPress={() => {
+                void saveCover(null, 'NORMAL');
+                setCoverOpen(false);
+              }}
+            >
+              <Text style={styles.coverRemoveText}>Remover capa</Text>
+            </TouchableOpacity>
+          </>
+        ) : null}
+        <TouchableOpacity style={styles.primaryBtn} onPress={() => setCoverOpen(false)}>
+          <Text style={styles.primaryBtnText}>Concluído</Text>
+        </TouchableOpacity>
+      </KanbanSheet>
+
+      <KanbanSheet
         visible={labelsOpen}
         onClose={() => setLabelsOpen(false)}
         title="Etiquetas"
@@ -1821,6 +1896,14 @@ function getStyles(colors: any, _isDark: boolean) {
       backgroundColor: colors.primary,
       borderColor: colors.primary,
     },
+    coverChip: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    coverDot: { width: 13, height: 13, borderRadius: 4 },
+    coverGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 14 },
+    coverSwatch: { width: 52, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+    coverSwatchActive: { borderWidth: 2, borderColor: colors.text },
+    coverSizeRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },
+    coverRemove: { alignItems: 'center', paddingVertical: 10, marginBottom: 6 },
+    coverRemoveText: { color: colors.primary, fontWeight: '700', fontSize: 13 },
     prioText: { fontSize: 11, fontWeight: '700', color: colors.textSecondary },
     prioTextActive: { color: '#fff' },
     titleRow: {
