@@ -4683,6 +4683,13 @@ const ORC_CORES_PINTURA: { hex: string; label: string }[] = [
   { hex: '#e5e7eb', label: 'Cinza' },
 ];
 
+/**
+ * Coluna «Valor total com desconto» (total com BDI × (1 − desconto)): fica escondida por padrão.
+ * Diferente das outras, o que se guarda em `colunasOcultasMontagem` é o marcador `…:on` (= mostrar).
+ */
+const ORC_COL_DESC_ID = 'totalBdiDesc';
+const ORC_COL_DESC_ON = `${ORC_COL_DESC_ID}:on`;
+
 /** Colunas opcionais da grade Orçamento (sel/item/descrição ficam sempre visíveis). */
 const ORC_COLUNAS_MONTAGEM_TOGGLE: { id: string; label: string }[] = [
   { id: 'codigo', label: 'Código' },
@@ -4697,6 +4704,7 @@ const ORC_COLUNAS_MONTAGEM_TOGGLE: { id: string; label: string }[] = [
   { id: 'subMat', label: 'Sub material' },
   { id: 'total', label: 'Valor total sem BDI' },
   { id: 'totalBdi', label: 'Valor total com BDI' },
+  { id: ORC_COL_DESC_ID, label: 'Valor total com desconto' },
   { id: 'peso', label: 'Peso' },
   { id: 'obs', label: 'Observação' },
 ];
@@ -4712,7 +4720,7 @@ function parseColunasOcultasMontagem(raw: unknown): string[] {
   const seen = new Set<string>();
   for (const v of raw) {
     const id = String(v ?? '').trim();
-    if (!ORC_COLUNAS_MONTAGEM_TOGGLE_IDS.has(id) || seen.has(id)) continue;
+    if ((!ORC_COLUNAS_MONTAGEM_TOGGLE_IDS.has(id) && id !== ORC_COL_DESC_ON) || seen.has(id)) continue;
     seen.add(id);
     out.push(id);
   }
@@ -4722,7 +4730,7 @@ function parseColunasOcultasMontagem(raw: unknown): string[] {
 /** Ids das colunas da grade do orçamento, na mesma ordem das colunas da planilha exportada. */
 const ORC_COLUNAS_EXPORT = [
   'item', 'codigo', 'banco', 'descricao', 'und', 'qtd', 'mo', 'mat',
-  'pu', 'puBdi', 'subMo', 'subMat', 'total', 'totalBdi', 'peso', 'obs',
+  'pu', 'puBdi', 'subMo', 'subMat', 'total', 'totalBdi', ORC_COL_DESC_ID, 'peso', 'obs',
 ] as const;
 
 function chaveCelulaOrc(rowKey: string, colId: string): string {
@@ -8416,6 +8424,12 @@ export function OrcamentoPageView({
   const [coresCelulaPorKey, setCoresCelulaPorKey] = useState<Record<string, string>>({});
   const [colunasOcultasMontagem, setColunasOcultasMontagem] = useState<string[]>([]);
   const bdiPctMetaAnteriorRef = useRef<number | null>(null);
+  // Lista de colunas realmente escondidas: a de desconto só aparece quando o marcador «:on» está ligado.
+  const colunasOcultasEfetivas = useMemo(() => {
+    const base = colunasOcultasMontagem.filter((id) => id !== ORC_COL_DESC_ON && id !== ORC_COL_DESC_ID);
+    if (!colunasOcultasMontagem.includes(ORC_COL_DESC_ON)) base.push(ORC_COL_DESC_ID);
+    return base;
+  }, [colunasOcultasMontagem]);
   const [menuColunasMontagem, setMenuColunasMontagem] = useState<{
     top: number;
     left: number;
@@ -17116,7 +17130,9 @@ export function OrcamentoPageView({
       };
     };
 
-    const empty = () => Array.from({ length: 16 }, () => '') as OrcamentoExcelRow['values'];
+    const empty = () => Array.from({ length: 17 }, () => '') as OrcamentoExcelRow['values'];
+    const fatorDesc = 1 - resumoFinanceiro.descontoPct;
+    const fatorDescTxt = String(fatorDesc);
     const rows: OrcamentoExcelRow[] = [];
     // Fórmulas só entram onde reproduzem o valor da tela; valor manual ou outro modo de arredondamento fica fixo.
     const fatorBdi = 1 + resumoFinanceiro.bdiPct;
@@ -17162,7 +17178,8 @@ export function OrcamentoPageView({
         values[11] = '';
         values[12] = arredondarMoeda2(resumo.custoDir);
         values[13] = arredondarMoeda2(resumo.totalComBdi);
-        values[14] = resumo.pesoPct;
+        values[14] = arredondarMoeda2(resumo.totalComBdi * fatorDesc);
+        values[15] = resumo.pesoPct;
         tituloIdxAtual = rows.length;
         titulosIdx.push(tituloIdxAtual);
         subsDoTitulo.set(tituloIdxAtual, []);
@@ -17181,7 +17198,8 @@ export function OrcamentoPageView({
       subValues[11] = '';
       subValues[12] = arredondarMoeda2(resumoSub.custoDir);
       subValues[13] = arredondarMoeda2(resumoSub.totalComBdi);
-      subValues[14] = resumoSub.pesoPct;
+      subValues[14] = arredondarMoeda2(resumoSub.totalComBdi * fatorDesc);
+      subValues[15] = resumoSub.pesoPct;
       const subIdxLinha = rows.length;
       subsDoTitulo.get(tituloIdxAtual)?.push(subIdxLinha);
       itensDoSub.set(subIdxLinha, []);
@@ -17227,6 +17245,7 @@ export function OrcamentoPageView({
         if (formulas[12] && bate(r2(totSem * fatorBdi), totCom)) {
           formulas[13] = `M{r}*${fatorBdiTxt}`;
         }
+        if (bate(r2(totCom * fatorDesc), r2(row.totalComBdi * fatorDesc))) formulas[14] = `N{r}*${fatorDescTxt}`;
         // Cores que o usuário pintou na grade (célula ou linha inteira) vão junto para o Excel.
         const coresPintura: NonNullable<OrcamentoExcelRow['cores']> = {};
         ORC_COLUNAS_EXPORT.forEach((colId, idx) => {
@@ -17255,6 +17274,7 @@ export function OrcamentoPageView({
             subMat,
             totSem,
             totCom,
+            arredondarMoeda2(row.totalComBdi * fatorDesc),
             totalGeralComBdi > 0 ? (row.totalComBdi / totalGeralComBdi) * 100 : 0,
             observacoesPorItem[row.key]?.trim() || row.dimensoes?.observacao?.trim() || '',
           ],
@@ -17283,8 +17303,9 @@ export function OrcamentoPageView({
       const f: Record<number, string> = {
         12: `SUM(M{R${de}}:M{R${ate}})`,
         13: `SUM(N{R${de}}:N{R${ate}})`,
+        14: `N{r}*${fatorDescTxt}`,
       };
-      if (denominadorPeso) f[14] = pesoFormula();
+      if (denominadorPeso) f[15] = pesoFormula();
       rows[subRow]!.formulas = f;
     }
     for (const [tituloRow, subs] of subsDoTitulo) {
@@ -17292,13 +17313,14 @@ export function OrcamentoPageView({
       const f: Record<number, string> = {
         12: somaColuna('M', subs),
         13: somaColuna('N', subs),
+        14: `N{r}*${fatorDescTxt}`,
       };
-      if (denominadorPeso) f[14] = pesoFormula();
+      if (denominadorPeso) f[15] = pesoFormula();
       rows[tituloRow]!.formulas = f;
     }
     if (denominadorPeso) {
       for (const linha of rows) {
-        if (linha.kind === 'item' && linha.formulas) linha.formulas[14] = pesoFormula();
+        if (linha.kind === 'item' && linha.formulas) linha.formulas[15] = pesoFormula();
       }
     }
 
@@ -17503,7 +17525,7 @@ export function OrcamentoPageView({
           ],
           // Linha 15: respiro. Linha 16: barra do orçamento.
           [],
-          [{ texto: 'ORÇAMENTO', de: 0, ate: 15, estilo: 'barra' }],
+          [{ texto: 'ORÇAMENTO', de: 0, ate: 16, estilo: 'barra' }],
         ],
         alturas: [14, 26, 26, 26, 26, 26, 26, 8, 24, 24, 30, 24, 30, 30, 24, 8, 22],
         semRespiro: true,
@@ -17552,11 +17574,12 @@ export function OrcamentoPageView({
         { header: 'SUB MATERIAL', width: 16, format: 'currency' },
         { header: 'VALOR TOTAL\nSEM BDI', width: 18, format: 'currency' },
         { header: 'VALOR TOTAL\nCOM BDI', width: 18, format: 'currency' },
+        { header: 'VALOR TOTAL\nCOM DESCONTO', width: 18, format: 'currency' },
         { header: 'PESO', width: 10, format: 'percent' },
         { header: 'OBSERVAÇÃO', width: 28 },
       ] as OrcamentoExcelColumn[]).map((col, idx): OrcamentoExcelColumn =>
         // Colunas desmarcadas em «Colunas visíveis» da aba Orçamento saem escondidas no Excel.
-        colunasOcultasMontagem.includes(ORC_COLUNAS_EXPORT[idx] as string) ? { ...col, oculta: true } : col
+        colunasOcultasEfetivas.includes(ORC_COLUNAS_EXPORT[idx] as string) ? { ...col, oculta: true } : col
       ),
       rows,
     };
@@ -22527,8 +22550,8 @@ export function OrcamentoPageView({
                       className={gradeTableViewportCls}
                       style={gradeZoomStyle}
                     >
-                      {colunasOcultasMontagem.length > 0 && (
-                        <style>{colunasOcultasMontagem
+                      {colunasOcultasEfetivas.length > 0 && (
+                        <style>{colunasOcultasEfetivas
                           .map(
                             (id) =>
                               `[data-orc-montagem-table] [data-orc-col="${id}"]{display:none!important}`
@@ -22584,6 +22607,7 @@ export function OrcamentoPageView({
                               </th>
                             )}
                             <th data-orc-col="totalBdi" className={`${GRADE_TH_STICKY} min-w-[13.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Valor total com BDI</th>
+                            <th data-orc-col="totalBdiDesc" className={`${GRADE_TH_STICKY} min-w-[13.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`} title="Valor total com BDI já com o desconto do orçamento">Valor total com desconto</th>
                             <th data-orc-col="peso" className={`${GRADE_TH_STICKY} w-[72px] px-2 py-2.5 text-center text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}>Peso</th>
                             <th data-orc-col="obs" className={`${GRADE_TH_STICKY} min-w-[16rem] w-[16rem] px-2 py-2.5 text-center text-[11px] font-semibold text-[var(--orc-header-fg,#4b5563)] uppercase tracking-wide border-l border-gray-300 dark:border-gray-600`}>Observação</th>
                           </tr>
@@ -22767,6 +22791,9 @@ export function OrcamentoPageView({
                                   <MoedaCelula valor={resumoTitulo.totalComBdi} className="text-sm text-white font-semibold" valorClassName="font-semibold" />
                                 )}
                               </td>
+                              <td data-orc-col="totalBdiDesc" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`}>
+                                <MoedaCelula valor={resumoTitulo.totalComBdi * (1 - descontoRodapePct)} className="text-sm text-white font-semibold" valorClassName="font-semibold" />
+                              </td>
                               <td
                                 data-orc-col="peso"
                                 className={`cursor-pointer px-2 py-2.5 text-sm text-center align-middle text-white tabular-nums whitespace-nowrap font-semibold ${borderTitulo}`}
@@ -22882,6 +22909,9 @@ export function OrcamentoPageView({
                                 {conteudoSomaOrc(`s:${bloco.key}`, 'totalBdi') ?? (
                                   <MoedaCelula valor={resumoSubtitulo.totalComBdi} className="text-sm font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
                                 )}
+                              </td>
+                              <td data-orc-col="totalBdiDesc" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`}>
+                                <MoedaCelula valor={resumoSubtitulo.totalComBdi * (1 - descontoRodapePct)} className="text-sm font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
                               </td>
                               <td
                                 data-orc-col="peso"
@@ -23274,6 +23304,14 @@ export function OrcamentoPageView({
                                       </React.Fragment>
                                         );
                                       })}
+                                      <td
+                                        data-orc-col="totalBdiDesc"
+                                        style={estiloFundoPinturaOrc(row.key, 'totalBdiDesc', coresLinhaPorKey, coresCelulaPorKey, isDark)}
+                                        className="px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums border-l border-gray-200 dark:border-gray-700 font-semibold text-gray-900 dark:text-gray-50"
+                                        title={`Valor total com BDI menos o desconto do orçamento (${(descontoRodapePct * 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%)`}
+                                      >
+                                        <MoedaCelula valor={row.totalComBdi * (1 - descontoRodapePct)} />
+                                      </td>
                                       <td data-orc-col="peso" style={estiloFundoPinturaOrc(row.key, 'peso', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="px-2 py-2.5 text-sm text-center align-middle text-gray-700 dark:text-gray-300 tabular-nums whitespace-nowrap border-l border-gray-200 dark:border-gray-700">
                                         {pesoPctOrcamento.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%
                                       </td>
@@ -26795,7 +26833,10 @@ export function OrcamentoPageView({
           </div>
           <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto overscroll-contain px-2">
             {ORC_COLUNAS_MONTAGEM_TOGGLE.map((col) => {
-              const visivel = !colunasOcultasMontagem.includes(col.id);
+              const ehDesc = col.id === ORC_COL_DESC_ID;
+              const visivel = ehDesc
+                ? colunasOcultasMontagem.includes(ORC_COL_DESC_ON)
+                : !colunasOcultasMontagem.includes(col.id);
               return (
                 <div
                   key={col.id}
@@ -26805,6 +26846,10 @@ export function OrcamentoPageView({
                     checked={visivel}
                     onChange={(checked) => {
                       setColunasOcultasMontagem((prev) => {
+                        if (ehDesc) {
+                          const sem = prev.filter((id) => id !== ORC_COL_DESC_ON);
+                          return checked ? [...sem, ORC_COL_DESC_ON] : sem;
+                        }
                         if (checked) return prev.filter((id) => id !== col.id);
                         if (prev.includes(col.id)) return prev;
                         return [...prev, col.id];
@@ -26820,7 +26865,7 @@ export function OrcamentoPageView({
             <button
               type="button"
               className="w-full rounded-md px-2 py-1.5 text-left text-sm font-medium text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-700/50"
-              onClick={() => setColunasOcultasMontagem([])}
+              onClick={() => setColunasOcultasMontagem([ORC_COL_DESC_ON])}
             >
               Mostrar todas
             </button>

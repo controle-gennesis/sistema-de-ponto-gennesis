@@ -1,3 +1,4 @@
+import { osCodigoComPastaNoXx } from '../utils/serviceOrderLabel';
 import { randomUUID } from 'crypto';
 import path from 'path';
 import { PERMISSION_ACCESS_ACTION, pathToModuleKey } from '@sistema-ponto/permission-modules';
@@ -406,6 +407,8 @@ type OsChoice = { divSe: string; folderNumber: string; label: string; descriptio
 function osLabelOf(divSe: string, folder: string): string {
   const d = divSe.replace(/^(OS|SE)\s+/i, '').trim();
   if (!d) return '';
+  const comNumero = osCodigoComPastaNoXx(d, folder);
+  if (comNumero) return comNumero;
   return folder ? `${d} - ${folder}` : d;
 }
 
