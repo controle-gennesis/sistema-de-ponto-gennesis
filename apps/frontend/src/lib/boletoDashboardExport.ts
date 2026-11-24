@@ -201,6 +201,138 @@ export async function exportDashboardPdf(data: ExportDashboard, filters: ExportF
   doc.setTextColor(30, 30, 30);
   y += 26;
 
+  // ── Gráficos (desenhados no próprio PDF, no mesmo padrão de cores do sistema) ──
+  const COLOR = { pago: '#34d399', aVencer: '#f59e0b', vencido: '#f87171', azul: '#60a5fa', grade: '#d1d5db', trilha: '#e5e7eb' };
+  const compact = (v: number) => {
+    const abs = Math.abs(v);
+    if (abs >= 1_000_000) return `${(v / 1_000_000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}M`;
+    if (abs >= 1_000) return `${(v / 1_000).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}K`;
+    return v.toLocaleString('pt-BR', { maximumFractionDigits: 0 });
+  };
+  /** Teto "redondo" do eixo (1, 2, 2,5, 5 ou 10 vezes uma potência de 10) e quatro divisões. */
+  const niceMax = (v: number) => {
+    if (v <= 0) return 1;
+    const exp = Math.pow(10, Math.floor(Math.log10(v)));
+    const f = v / exp;
+    const n = f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10;
+    return n * exp;
+  };
+  const sectionTitle = (text: string, x: number, yy: number) => {
+    font(11, true);
+    doc.setTextColor(185, 28, 28);
+    doc.text(text, x, yy);
+    doc.setTextColor(30, 30, 30);
+  };
+
+  // Valor por mês de vencimento (barras empilhadas)
+  const meses = data.byMonth;
+  if (meses.length) {
+    const chartH = pageH - y - M - 8;
+    sectionTitle('Valor por mês de vencimento', M, y + 3);
+    // legenda no canto direito
+    font(8);
+    let lx = pageW - M;
+    ([['Vencido', COLOR.vencido], ['À vencer', COLOR.aVencer], ['Pago', COLOR.pago]] as const).forEach(([nome, cor]) => {
+      const tw = doc.getTextWidth(nome);
+      doc.text(nome, lx - tw, y + 2.6);
+      doc.setFillColor(cor);
+      doc.circle(lx - tw - 3, y + 1.9, 1.1, 'F');
+      lx -= tw + 10;
+    });
+    const top = y + 10;
+    const bottom = y + Math.max(40, chartH) - 8;
+    const left = M + 14;
+    const right = pageW - M;
+    const plotH = bottom - top;
+    const max = niceMax(Math.max(...meses.map((m) => m.value), 1));
+    // grade pontilhada + eixo
+    doc.setLineWidth(0.2);
+    doc.setDrawColor(COLOR.grade);
+    doc.setLineDashPattern([0.8, 1.2], 0);
+    font(7);
+    doc.setTextColor(110, 110, 110);
+    for (let i = 0; i <= 4; i += 1) {
+      const gy = bottom - (plotH * i) / 4;
+      doc.line(left, gy, right, gy);
+      doc.text(compact((max * i) / 4), left - 2, gy + 1, { align: 'right' });
+    }
+    doc.setLineDashPattern([], 0);
+    // barras
+    const slot = (right - left) / meses.length;
+    const barW = Math.min(14, slot * 0.62);
+    meses.forEach((m, i) => {
+      const cx = left + slot * i + slot / 2;
+      let base = bottom;
+      ([[m.pago, COLOR.pago], [m.aVencer, COLOR.aVencer], [m.vencido, COLOR.vencido]] as const).forEach(([val, cor]) => {
+        const h = (Math.max(0, val) / max) * plotH;
+        if (h <= 0.05) return;
+        doc.setFillColor(cor);
+        doc.rect(cx - barW / 2, base - h, barW, h, 'F');
+        base -= h;
+      });
+      if (m.value > 0) {
+        font(7, true);
+        doc.setTextColor(55, 65, 81);
+        doc.text(compact(m.value), cx, base - 1.4, { align: 'center' });
+      }
+      font(7);
+      doc.setTextColor(110, 110, 110);
+      if (slot >= 9 || i % 2 === 0) doc.text(monthLabel(m.key), cx, bottom + 4.5, { align: 'center' });
+    });
+    doc.setTextColor(30, 30, 30);
+  }
+
+  // Segunda página: polo, gestor, centro de custo e fornecedor com barra de progresso
+  doc.addPage();
+  y = M;
+  const colGap = 8;
+  const colW = (pageW - M * 2 - colGap) / 2;
+  const rankList = (title: string, rows: ExportBucket[], x: number, yy: number, cor: string, withPct: boolean, limit: number, pick?: (b: ExportBucket) => number) => {
+    sectionTitle(title, x, yy + 3);
+    let ry = yy + 9;
+    const getV = pick ?? ((b: ExportBucket) => b.value);
+    const list = rows.filter((b) => getV(b) > 0).slice(0, limit);
+    if (!list.length) {
+      font(8.5);
+      doc.setTextColor(120, 120, 120);
+      doc.text('Sem dados no filtro atual.', x, ry + 3);
+      doc.setTextColor(30, 30, 30);
+      return ry + 10;
+    }
+    const maxV = Math.max(...list.map(getV), 1);
+    const sumV = list.reduce((s, b) => s + getV(b), 0);
+    list.forEach((b) => {
+      const v = getV(b);
+      font(8.5);
+      doc.setTextColor(55, 65, 81);
+      const valor = brl(v) + (withPct && sumV > 0 ? `  ${pct(v, sumV).toLocaleString('pt-BR')}%` : '');
+      const vw = doc.getTextWidth(valor);
+      doc.text(cut(b.label, colW - vw - 4), x, ry + 3);
+      font(8.5, true);
+      doc.setTextColor(17, 24, 39);
+      doc.text(valor, x + colW, ry + 3, { align: 'right' });
+      doc.setFillColor(COLOR.trilha);
+      doc.roundedRect(x, ry + 5, colW, 2, 1, 1, 'F');
+      doc.setFillColor(cor);
+      doc.roundedRect(x, ry + 5, Math.max(1.5, (v / maxV) * colW), 2, 1, 1, 'F');
+      ry += 9.5;
+    });
+    doc.setTextColor(30, 30, 30);
+    return ry + 6;
+  };
+  const yEsq = rankList('Valor por polo', data.byPolo, M, y, COLOR.azul, true, 6);
+  rankList('Valor por gestor', data.byManager, M, yEsq, COLOR.azul, true, 8);
+  const yDir = rankList('Centros de custo (8 maiores)', data.byCostCenter, M + colW + colGap, y, COLOR.azul, false, 8);
+  rankList('Fornecedores (8 maiores)', data.bySupplier, M + colW + colGap, yDir, COLOR.azul, false, 8);
+
+  // Detalhamento em tabelas
+  doc.addPage();
+  y = M;
+  font(13, true);
+  doc.setTextColor(30, 30, 30);
+  doc.text('Detalhamento', M, y + 4);
+  y += 10;
+
   // Tabelas
   const cols = [
     { head: '', w: 0, align: 'left' as const },
