@@ -40,6 +40,7 @@ import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import jwt from 'jsonwebtoken';
 
+import './lib/fetchTimeout';
 import { initSentry, Sentry } from './lib/sentry';
 import { slowRequestLogger } from './middleware/slowRequestLogger';
 initSentry();
