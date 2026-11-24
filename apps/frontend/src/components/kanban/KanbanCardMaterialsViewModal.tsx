@@ -2,7 +2,6 @@
 
 import React from 'react';
 import { Download } from 'lucide-react';
-import * as XLSX from 'xlsx';
 import { Modal } from '@/components/ui/Modal';
 import type { KanbanCardMaterial } from '@/lib/kanban';
 
@@ -21,7 +20,8 @@ export function KanbanCardMaterialsViewModal({
   materials,
   cardTitle,
 }: KanbanCardMaterialsViewModalProps) {
-  const download = () => {
+  const download = async () => {
+    const XLSX = await import('xlsx');
     const rows = [
       ['Código', 'Nome', 'Unidade', 'Quantidade', 'Observação'],
       ...materials.map((m) => [m.code ?? '', m.name, m.unit, Number(m.quantity ?? 1), m.observation ?? '']),

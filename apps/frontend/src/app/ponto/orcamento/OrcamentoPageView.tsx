@@ -59,7 +59,6 @@ import { ObraSelectField } from '@/components/engenharia/ObraSelectField';
 import toast from 'react-hot-toast';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { usePermissions } from '@/hooks/usePermissions';
-import jsPDF from 'jspdf';
 import * as XLSX from 'xlsx';
 import { BRAZIL_STATE_LABELS } from '@/lib/brazilStates';
 import { useCostCenters } from '@/hooks/useCostCenters';
@@ -19323,12 +19322,13 @@ export function OrcamentoPageView({
     }
   };
 
-  const exportarFichaDemandaPdf = () => {
+  const exportarFichaDemandaPdf = async () => {
     if (linhasFichaDemanda.length === 0) {
       toast.error('Não há dados para exportar.');
       return;
     }
     const nomeContrato = nomeContratoExport();
+    const { default: jsPDF } = await import('jspdf');
     const pdf = new jsPDF('l', 'mm', 'a4');
     const pageW = pdf.internal.pageSize.getWidth();
     const pageH = pdf.internal.pageSize.getHeight();

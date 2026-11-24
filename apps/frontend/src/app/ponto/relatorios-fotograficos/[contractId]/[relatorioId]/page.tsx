@@ -3,7 +3,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import jsPDF from 'jspdf';
 import {
   Camera,
   FileImage,
@@ -298,6 +297,7 @@ export default function RelatorioFotograficoEditorPage() {
 
     setIsExportingPdf(true);
     try {
+      const { default: jsPDF } = await import('jspdf');
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pageW = pdf.internal.pageSize.getWidth();
       const pageH = pdf.internal.pageSize.getHeight();
