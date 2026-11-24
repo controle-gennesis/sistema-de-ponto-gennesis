@@ -1,5 +1,6 @@
 'use client';
 
+import { osCodigoComPastaNoXx } from '@/lib/formatOsSePasta';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -1049,7 +1050,7 @@ export function DiarioObraEditor({
         {
           const d = String(res.data?.data?.osDivSe ?? '').replace(/^(OS|SE)\s+/i, '').trim();
           const f = String(res.data?.data?.osFolder ?? '').trim();
-          setOsLabel(d ? (f ? `${d} - ${f}` : d) : '');
+          setOsLabel(d ? (osCodigoComPastaNoXx(d, f) ?? (f ? `${d} - ${f}` : d)) : '');
         }
         setLoadedKey(`${obraId}|${selected}`);
       })

@@ -42,6 +42,9 @@ export interface KanbanCard {
   createdAt: string;
   completedAt?: string | null;
   workHours?: number | null;
+  /** Capa colorida (green, yellow, orange, red, purple, blue, sky, lime, pink, black) ou null. */
+  coverColor?: string | null;
+  coverSize?: 'NORMAL' | 'FULL';
 }
 
 export interface KanbanCardCostPerson {
@@ -719,6 +722,8 @@ export async function updateKanbanCard(
     attachmentsEnabled?: boolean;
     position?: number;
     workHours?: number | null;
+    coverColor?: string | null;
+    coverSize?: 'NORMAL' | 'FULL';
     completedAt?: string | null;
     archivedAt?: string | null;
   },

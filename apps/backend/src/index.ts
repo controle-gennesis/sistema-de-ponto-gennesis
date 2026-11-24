@@ -40,7 +40,9 @@ import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import jwt from 'jsonwebtoken';
 
+import './lib/fetchTimeout';
 import { initSentry, Sentry } from './lib/sentry';
+import { slowRequestLogger } from './middleware/slowRequestLogger';
 initSentry();
 
 import { createError, errorHandler } from './middleware/errorHandler';
@@ -427,6 +429,8 @@ app.use('/api/auth/reset-password', passwordResetLimiter);
 
 // Logging
 app.use(morgan('combined'));
+// Log das rotas lentas (> SLOW_REQUEST_MS, padrão 500 ms)
+app.use(slowRequestLogger);
 app.use(
   express.json({
     limit: '50mb',

@@ -16,8 +16,8 @@ import { BlurView } from 'expo-blur';
 import { useTheme } from '../context/ThemeContext';
 import { useNotifications } from '../notifications/NotificationsContext';
 import { useChromeVisibility } from '../navigation/ChromeVisibilityContext';
-import { ThemePatternFill } from './ThemeBackground';
 import Menu from './Menu';
+import { GlassBlur } from './GlassBg';
 
 /** Folga abaixo da status bar — no Android evitar padding duplo (insets + StatusBar). */
 const HEADER_TOP_GAP = Platform.OS === 'ios' ? 6 : 2;
@@ -51,21 +51,7 @@ export function HeaderIconButton({
       activeOpacity={0.7}
     >
       {/* Fundo em círculo, separado do conteúdo para a bolinha de notificações poder sair dele. */}
-      {Platform.OS === 'ios' ? (
-        <BlurView
-          intensity={70}
-          tint={isDark ? 'systemChromeMaterialDark' : 'systemChromeMaterialLight'}
-          style={[StyleSheet.absoluteFill, styles.glassBg, { borderColor: isDark ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.7)' }]}
-        />
-      ) : (
-        <View
-          style={[
-            StyleSheet.absoluteFill,
-            styles.glassBg,
-            { backgroundColor: isDark ? colors.card : colors.surface, borderColor: isDark ? 'transparent' : 'rgba(15,23,42,0.08)' },
-          ]}
-        />
-      )}
+      <GlassBlur radius={22} />
       {children}
     </TouchableOpacity>
   );
@@ -207,7 +193,27 @@ export default function AppHeader({
         ]}
       >
         <View pointerEvents="box-none" style={styles.headerShell}>
-          <ThemePatternFill />
+          <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { opacity: chrome.glass }]}>
+            {Platform.OS === 'ios' ? (
+              <BlurView
+                intensity={55}
+                tint={isDark ? 'systemChromeMaterialDark' : 'systemChromeMaterialLight'}
+                style={StyleSheet.absoluteFill}
+              />
+            ) : (
+              <View style={[StyleSheet.absoluteFill, { backgroundColor: isDark ? 'rgba(17,24,39,0.92)' : 'rgba(255,255,255,0.92)' }]} />
+            )}
+            <View
+              style={{
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                bottom: 0,
+                height: StyleSheet.hairlineWidth,
+                backgroundColor: isDark ? 'rgba(255,255,255,0.14)' : 'rgba(15,23,42,0.14)',
+              }}
+            />
+          </Animated.View>
           {headerInner}
         </View>
       </Animated.View>
@@ -225,9 +231,10 @@ const styles = StyleSheet.create({
     right: 0,
     zIndex: 20,
   },
+  // Sem fundo: o conteúdo passa por trás dos botões (padrão iOS), sem cortar.
   headerShell: {
     position: 'relative',
-    overflow: 'hidden',
+    backgroundColor: 'transparent',
   },
   topSafe: {
     backgroundColor: 'transparent',

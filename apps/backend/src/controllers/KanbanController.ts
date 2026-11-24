@@ -552,6 +552,8 @@ export class KanbanController {
         attachmentsEnabled,
         position,
         workHours,
+        coverColor,
+        coverSize,
         completedAt,
         archivedAt,
       } = req.body;
@@ -573,6 +575,8 @@ export class KanbanController {
         attachmentsEnabled:
           attachmentsEnabled !== undefined ? Boolean(attachmentsEnabled) : undefined,
         position: position != null ? Number(position) : undefined,
+        coverColor: coverColor === undefined ? undefined : coverColor === null || coverColor === '' ? null : String(coverColor),
+        coverSize: coverSize === undefined ? undefined : String(coverSize),
         workHours:
           workHours !== undefined
             ? workHours == null || workHours === ''
@@ -881,6 +885,8 @@ export class KanbanController {
         const upstream = await fetch(att.fileUrl, {
           headers: { Authorization: `OAuth oauth_consumer_key="${key}", oauth_token="${token}"` },
           redirect: 'follow',
+          // Download de arquivo grande: mais tempo que o padrão das chamadas de API.
+          signal: AbortSignal.timeout(10 * 60_000),
         });
         if (!upstream.ok || !upstream.body) {
           return next(

@@ -1,8 +1,7 @@
 'use client';
 
-import React, { useMemo, useRef, useState } from 'react';
-import { toast } from 'react-hot-toast';
-import { toPng } from 'html-to-image';
+import React, { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import {
   Area,
@@ -12,9 +11,6 @@ import {
   CartesianGrid,
   Cell,
   LabelList,
-  Legend,
-  Pie,
-  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -31,11 +27,12 @@ import {
   CreditCard,
   Gauge,
   ReceiptText,
-  Download,
+  FileSpreadsheet,
   FileText,
+  Filter,
   FilterX,
-  ListFilter,
   Loader2,
+  ListFilter,
   Truck,
   UserCog,
   Wallet,
@@ -50,27 +47,20 @@ import { Loading } from '@/components/ui/Loading';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import { ListPageHeader, PageStack } from '@/components/ui/pageLayout';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
-import { MultiSelectSearchDropdown } from '@/components/ui/MultiSelectSearchDropdown';
-import {
-  exportDashboardBoletosExcel,
-  exportDashboardBoletosPdf,
-  type DashReport,
-  type DashReportChart,
-  type DashReportTable,
-} from '@/lib/exportDashboardBoletos';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { useTheme } from '@/context/ThemeContext';
+import toast from 'react-hot-toast';
+import { exportDashboardExcel, exportDashboardPdf, type ExportFilterLine } from '@/lib/boletoDashboardExport';
 import { useLogout } from '@/hooks/useLogout';
 import { authService } from '@/lib/auth';
 import api from '@/lib/api';
 import {
   BAR_STAGGER_MS,
-  CountUpLabel,
   type ChartLabelProps,
   FadeInTopLabel,
-  growingBarShape,
   growingColumnShape,
   rowInStyle,
+  prefersReducedMotion,
   useAnimatedNumber,
 } from '@/lib/chartAnimation';
 
@@ -97,61 +87,28 @@ type Dashboard = {
   byMonthPolo: Array<{ key: string; polos: Record<string, { value: number; count: number }> }>;
 };
 
-type Filters = {
-  polo: string[];
-  costCenter: string[];
-  manager: string[];
-  supplier: string[];
-  status: string;
-  periodo: string;
-  dueFrom: string;
-  dueTo: string;
-};
-const EMPTY_FILTERS: Filters = { polo: [], costCenter: [], manager: [], supplier: [], status: '', periodo: '', dueFrom: '', dueTo: '' };
+type Filters = { polo: string; costCenter: string; manager: string; status: string; dueFrom: string; dueTo: string };
+const EMPTY_FILTERS: Filters = { polo: '', costCenter: '', manager: '', status: '', dueFrom: '', dueTo: '' };
 
-const STATUS_OPCOES = [
+/** Situação do boleto (valor enviado ao servidor + rótulo na tela). */
+const STATUS_OPTIONS = [
   { value: 'PAGO', label: 'Pago' },
   { value: 'A_VENCER', label: 'À vencer' },
   { value: 'VENCIDO', label: 'Vencido' },
 ];
-const STATUS_LABEL: Record<string, string> = { PAGO: 'Pago', A_VENCER: 'À vencer', VENCIDO: 'Vencido' };
-
-/** Atalhos de período (por data de vencimento) → intervalo AAAA-MM-DD. */
-const PERIODOS = [
-  { value: 'este-mes', label: 'Este mês' },
-  { value: 'mes-anterior', label: 'Mês anterior' },
-  { value: 'proximo-mes', label: 'Próximo mês' },
-  { value: 'proximos-30', label: 'Próximos 30 dias' },
-  { value: 'este-ano', label: 'Este ano' },
-  { value: 'ano-anterior', label: 'Ano anterior' },
-  { value: 'personalizado', label: 'Personalizado' },
-];
-const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-function intervaloDoPeriodo(p: string): { dueFrom: string; dueTo: string } | null {
-  const hoje = new Date();
-  const y = hoje.getFullYear();
-  const m = hoje.getMonth();
-  switch (p) {
-    case 'este-mes':
-      return { dueFrom: ymd(new Date(y, m, 1)), dueTo: ymd(new Date(y, m + 1, 0)) };
-    case 'mes-anterior':
-      return { dueFrom: ymd(new Date(y, m - 1, 1)), dueTo: ymd(new Date(y, m, 0)) };
-    case 'proximo-mes':
-      return { dueFrom: ymd(new Date(y, m + 1, 1)), dueTo: ymd(new Date(y, m + 2, 0)) };
-    case 'proximos-30':
-      return { dueFrom: ymd(hoje), dueTo: ymd(new Date(y, m, hoje.getDate() + 30)) };
-    case 'este-ano':
-      return { dueFrom: `${y}-01-01`, dueTo: `${y}-12-31` };
-    case 'ano-anterior':
-      return { dueFrom: `${y - 1}-01-01`, dueTo: `${y - 1}-12-31` };
-    default:
-      return null;
-  }
-}
-const fmtYmd = (v: string) => (/^\d{4}-\d{2}-\d{2}$/.test(v) ? `${v.slice(8, 10)}/${v.slice(5, 7)}/${v.slice(0, 4)}` : v);
 
 const CHART_PALETTE = ['#b91c1c', '#0f766e', '#1e40af', '#c2410c', '#0891b2', '#a16207', '#be185d', '#334155'];
-const STATUS_COLORS = { pago: '#059669', aVencer: '#d97706', vencido: '#dc2626' };
+const STATUS_COLORS = { pago: '#34d399', aVencer: '#f59e0b', vencido: '#f87171' };
+/** Azul das barras, o mesmo do gráfico de Faturamento das páginas de contrato. */
+const SERIES_BLUE = '#60a5fa';
+
+/** Valores curtos nos eixos e rótulos das barras: 233K, 2,2M. */
+function compactAxis(v: number): string {
+  const abs = Math.abs(v);
+  if (abs >= 1_000_000) return `${(v / 1_000_000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}M`;
+  if (abs >= 1_000) return `${(v / 1_000).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}K`;
+  return v.toLocaleString('pt-BR', { maximumFractionDigits: 0 });
+}
 const MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -216,20 +173,6 @@ function ChartLightTooltip({
   );
 }
 
-/** Degradês das barras (um por cor), como nos gráficos de contrato. */
-function BarGradients({ idPrefix, colors, horizontal = false }: { idPrefix: string; colors: string[]; horizontal?: boolean }) {
-  return (
-    <defs>
-      {colors.map((c, i) => (
-        <linearGradient key={`${c}-${i}`} id={`${idPrefix}-${i}`} x1="0" y1="0" x2={horizontal ? 1 : 0} y2={horizontal ? 0 : 1}>
-          <stop offset="0%" stopColor={c} stopOpacity={horizontal ? 0.6 : 0.95} />
-          <stop offset="100%" stopColor={c} stopOpacity={horizontal ? 1 : 0.55} />
-        </linearGradient>
-      ))}
-    </defs>
-  );
-}
-
 function SectionTitle({
   icon: Icon,
   title,
@@ -256,33 +199,43 @@ function SectionTitle({
   );
 }
 
+/** Bolinha + nome da série, no canto do cartão (como em Faturamento por Mês x Meta). */
+function LegendDot({ color, label }: { color: string; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: color }} /> {label}
+    </span>
+  );
+}
+
 function ChartCard({
-  icon,
   title,
   subtitle,
+  legend,
   className,
   children,
-  iconBg,
-  iconColor,
-  exportChart,
 }: {
-  icon: LucideIcon;
+  icon?: LucideIcon;
   title: string;
-  subtitle?: string;
+  subtitle?: React.ReactNode;
+  legend?: React.ReactNode;
   className?: string;
   children: React.ReactNode;
   iconBg?: string;
   iconColor?: string;
-  /** Entra como imagem no PDF exportado (título usado no relatório). */
-  exportChart?: string;
 }) {
   return (
-    <Card
-      className={`${cadastroListClasses.card} flex h-full min-h-0 flex-col ${className || ''}`}
-      data-export-chart={exportChart || undefined}
-    >
-      <CardHeader className={cadastroListClasses.cardHeader}>
-        <SectionTitle icon={icon} title={title} subtitle={subtitle} iconBg={iconBg} iconColor={iconColor} />
+    <Card className={`${cadastroListClasses.card} flex h-full min-h-0 flex-col ${className || ''}`}>
+      <CardHeader className={`${cadastroListClasses.cardHeader} !pt-5`}>
+        <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-2">
+          <div className="min-w-0 flex-1">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 sm:text-xl">{title}</h3>
+            {subtitle ? <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{subtitle}</p> : null}
+          </div>
+          {legend ? (
+            <div className="flex shrink-0 flex-wrap items-center justify-end gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400">{legend}</div>
+          ) : null}
+        </div>
       </CardHeader>
       <CardContent className={`${cadastroListClasses.cardContent} flex min-h-0 flex-1 flex-col`}>{children}</CardContent>
     </Card>
@@ -293,141 +246,18 @@ function ChartEmpty({ icon }: { icon: LucideIcon }) {
   return <CadastroListEmpty icon={icon} hint="Ajuste os filtros para ver os dados" title="Sem dados no filtro atual" />;
 }
 
-/** Barras horizontais de valor total (ranking). */
-function RankBarChart({ data, icon, color }: { data: Bucket[]; icon: LucideIcon; color?: string }) {
-  const theme = useChartTheme();
-  const uid = React.useId().replace(/:/g, '');
-  if (!data.length) return <ChartEmpty icon={icon} />;
-  const max = Math.max(...data.map((d) => d.value), 1);
-  const height = Math.max(220, data.length * 38 + 16);
-  const longest = Math.max(...data.map((d) => d.label.length), 1);
-  const yAxisWidth = Math.min(168, Math.max(68, Math.round(longest * 6.4)));
-  const rightMargin = Math.min(108, Math.max(60, Math.round(brlCompact(max).length * 7)));
-  const labelMax = Math.max(10, Math.floor(yAxisWidth / 6.2));
-  return (
-    <div className="w-full" style={{ height }}>
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} layout="vertical" margin={{ top: 2, right: rightMargin, bottom: 2, left: 0 }} barCategoryGap="18%">
-          <BarGradients idPrefix={`rk-${uid}`} colors={data.map((d, i) => color ?? CHART_PALETTE[i % CHART_PALETTE.length])} horizontal />
-          <CartesianGrid strokeDasharray="3 3" stroke={theme.chartGrid} horizontal={false} />
-          <XAxis type="number" hide domain={[0, max]} />
-          <YAxis
-            type="category"
-            dataKey="label"
-            width={yAxisWidth}
-            tickLine={false}
-            axisLine={false}
-            tickMargin={4}
-            tick={{ fill: theme.chartTick, fontSize: 11 }}
-            tickFormatter={(v: string) => truncate(v, labelMax)}
-          />
-          <Tooltip
-            cursor={{ fill: theme.barCursor, radius: 8 }}
-            content={({ active, payload }) => {
-              const b = payload?.[0]?.payload as Bucket | undefined;
-              return (
-                <ChartLightTooltip
-                  active={active}
-                  label={b?.label}
-                  rows={b ? [{ key: 'v', name: `Total · ${b.count} boletos`, value: brl(b.value), color: String(payload?.[0]?.color || '#64748b') }] : []}
-                />
-              );
-            }}
-          />
-          <Bar dataKey="value" radius={[0, 6, 6, 0]} maxBarSize={26} isAnimationActive={false} shape={growingBarShape('value')}>
-            {data.map((d, i) => (
-              <Cell key={d.key} fill={`url(#rk-${uid}-${i})`} />
-            ))}
-            <LabelList
-              dataKey="value"
-              content={(labelProps) => (
-                <CountUpLabel {...(labelProps as unknown as ChartLabelProps)} color={theme.chartLabel} format={brlCompact} />
-              )}
-            />
-          </Bar>
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
-  );
-}
-
-function DonutChart({ data, icon }: { data: Bucket[]; icon: LucideIcon }) {
-  const theme = useChartTheme();
-  const total = data.reduce((s, d) => s + d.value, 0);
-  const totalShown = useAnimatedNumber(total, 0, 1100);
-  const [hover, setHover] = useState<number | null>(null);
-  if (!data.length || total <= 0) return <ChartEmpty icon={icon} />;
-  const slices = data.map((d, i) => ({ ...d, color: CHART_PALETTE[i % CHART_PALETTE.length] }));
-  return (
-    <div className="flex flex-col items-stretch gap-5 sm:flex-row sm:items-center">
-      <div className="relative mx-auto h-[210px] w-[210px] shrink-0 sm:mx-0">
-        <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
-            <Pie
-              data={slices}
-              dataKey="value"
-              nameKey="label"
-              cx="50%"
-              cy="50%"
-              innerRadius={44}
-              outerRadius={96}
-              paddingAngle={1.5}
-              stroke={theme.pieStroke}
-              strokeWidth={3}
-              cornerRadius={3}
-              animationDuration={1100}
-              animationEasing="ease-out"
-              onMouseEnter={(_, i) => setHover(i)}
-              onMouseLeave={() => setHover(null)}
-            >
-              {slices.map((s) => (
-                <Cell key={s.key} fill={s.color} fillOpacity={hover === null || hover === slices.indexOf(s) ? 1 : 0.45} />
-              ))}
-            </Pie>
-          </PieChart>
-        </ResponsiveContainer>
-        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-          <span className="max-w-[80px] truncate text-base font-bold leading-none tabular-nums text-gray-900 dark:text-gray-100">
-            {hover !== null && slices[hover] ? brlCompact(slices[hover].value) : brlCompact(totalShown)}
-          </span>
-          <span className="mt-1 max-w-[80px] truncate text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
-            {hover !== null && slices[hover] ? slices[hover].label : "Total"}
-          </span>
-        </div>
-      </div>
-      <ul className="min-w-0 flex-1 space-y-2.5">
-        {slices.slice(0, 7).map((s) => {
-          const pct = Math.round((s.value / total) * 1000) / 10;
-          return (
-            <li key={s.key} className="flex items-center gap-2 text-xs">
-              <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: s.color }} aria-hidden />
-              <span className="min-w-0 flex-1 truncate font-medium text-gray-800 dark:text-gray-100" title={s.label}>
-                {s.label}
-              </span>
-              <span className="shrink-0 font-semibold tabular-nums text-gray-700 dark:text-gray-200">{brlCompact(s.value)}</span>
-              <span className="w-12 shrink-0 text-right tabular-nums text-gray-500 dark:text-gray-400">{pct.toLocaleString('pt-BR')}%</span>
-            </li>
-          );
-        })}
-      </ul>
-    </div>
-  );
-}
-
 /** Colunas empilhadas por mês de vencimento: pago / à vencer / vencido. */
 function MonthlyChart({ data }: { data: Bucket[] }) {
   const theme = useChartTheme();
-  const uid = React.useId().replace(/:/g, '');
   if (!data.length) return <ChartEmpty icon={CalendarRange} />;
   const rows = data.map((d) => ({ ...d, mes: monthLabel(d.key) }));
   return (
-    <div className="h-[320px] w-full">
+    <div className="h-[260px] w-full">
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={rows} margin={{ top: 12, right: 8, bottom: 4, left: 4 }} barCategoryGap="22%">
-          <BarGradients idPrefix={`mo-${uid}`} colors={[STATUS_COLORS.pago, STATUS_COLORS.aVencer, STATUS_COLORS.vencido]} />
-          <CartesianGrid strokeDasharray="3 3" stroke={theme.chartGrid} vertical={false} />
-          <XAxis dataKey="mes" tickLine={false} axisLine={false} tick={{ fill: theme.chartTick, fontSize: 11 }} interval={0} angle={rows.length > 14 ? -45 : 0} textAnchor={rows.length > 14 ? 'end' : 'middle'} height={rows.length > 14 ? 48 : 28} />
-          <YAxis tickLine={false} axisLine={false} width={64} tick={{ fill: theme.chartTick, fontSize: 11 }} tickFormatter={(v) => brlCompact(Number(v))} />
+        <BarChart data={rows} margin={{ top: 22, right: 10, bottom: 4, left: 0 }} barCategoryGap="22%">
+          <CartesianGrid strokeDasharray="4 6" stroke={theme.chartGrid} vertical={false} />
+          <XAxis dataKey="mes" tickLine={false} axisLine={false} tickMargin={6} tick={{ fill: theme.chartTick, fontSize: 11, fontWeight: 500 }} interval={0} angle={rows.length > 14 ? -45 : 0} textAnchor={rows.length > 14 ? 'end' : 'middle'} height={rows.length > 14 ? 48 : 28} />
+          <YAxis tickLine={false} axisLine={false} width={44} tick={{ fill: theme.chartTick, fontSize: 10 }} tickFormatter={(v) => compactAxis(Number(v))} />
           <Tooltip
             cursor={{ fill: theme.barCursor, radius: 8 }}
             content={({ active, label, payload }) => (
@@ -443,10 +273,18 @@ function MonthlyChart({ data }: { data: Bucket[] }) {
               />
             )}
           />
-          <Legend wrapperStyle={{ fontSize: 12 }} />
-          <Bar dataKey="pago" name="Pago" stackId="s" fill={`url(#mo-${uid}-0)`} isAnimationActive={false} shape={growingColumnShape('pago', 0)} />
-          <Bar dataKey="aVencer" name="À vencer" stackId="s" fill={`url(#mo-${uid}-1)`} isAnimationActive={false} shape={growingColumnShape('aVencer', 0)} />
-          <Bar dataKey="vencido" name="Vencido" stackId="s" fill={`url(#mo-${uid}-2)`} radius={[4, 4, 0, 0]} isAnimationActive={false} shape={growingColumnShape('vencido', 4)} />
+          <Bar dataKey="pago" name="Pago" stackId="s" fill={STATUS_COLORS.pago} maxBarSize={44} isAnimationActive={false} shape={growingColumnShape('pago', 0)} />
+          <Bar dataKey="aVencer" name="À vencer" stackId="s" fill={STATUS_COLORS.aVencer} maxBarSize={44} isAnimationActive={false} shape={growingColumnShape('aVencer', 0)} />
+          <Bar dataKey="vencido" name="Vencido" stackId="s" fill={STATUS_COLORS.vencido} maxBarSize={44} isAnimationActive={false} shape={growingColumnShape('vencido', 6)}>
+            <LabelList
+              dataKey="vencido"
+              content={(labelProps) => {
+                const lp = labelProps as unknown as ChartLabelProps;
+                const total = rows[Number(lp.index ?? 0)]?.value ?? 0;
+                return <FadeInTopLabel {...lp} value={total} color={theme.chartLabel} fontSize={11} format={compactAxis} />;
+              }}
+            />
+          </Bar>
         </BarChart>
       </ResponsiveContainer>
     </div>
@@ -455,7 +293,6 @@ function MonthlyChart({ data }: { data: Bucket[] }) {
 
 function PaymentTypeBlock({ data }: { data: Bucket[] }) {
   const theme = useChartTheme();
-  const uid = React.useId().replace(/:/g, '');
   const total = data.reduce((s, d) => s + d.value, 0);
   const totalCount = data.reduce((s, d) => s + d.count, 0);
   if (!totalCount) return <ChartEmpty icon={CreditCard} />;
@@ -463,11 +300,10 @@ function PaymentTypeBlock({ data }: { data: Bucket[] }) {
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
       <div className="h-[260px] w-full">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data} margin={{ top: 18, right: 8, bottom: 4, left: 4 }} barCategoryGap="22%">
-            <BarGradients idPrefix={`pt-${uid}`} colors={data.map((_, i) => CHART_PALETTE[i % CHART_PALETTE.length])} />
+          <BarChart data={data} margin={{ top: 22, right: 10, bottom: 4, left: 0 }} barCategoryGap="28%">
             <CartesianGrid strokeDasharray="4 6" stroke={theme.chartGrid} vertical={false} />
-            <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fill: theme.chartTick, fontSize: 10 }} interval={0} tickFormatter={(v: string) => truncate(v, 14)} />
-            <YAxis tickLine={false} axisLine={false} width={64} tick={{ fill: theme.chartTick, fontSize: 11 }} tickFormatter={(v) => brlCompact(Number(v))} />
+            <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={6} tick={{ fill: theme.chartTick, fontSize: 11, fontWeight: 500 }} interval={0} tickFormatter={(v: string) => truncate(v, 14)} />
+            <YAxis tickLine={false} axisLine={false} width={44} tick={{ fill: theme.chartTick, fontSize: 10 }} tickFormatter={(v) => compactAxis(Number(v))} />
             <Tooltip
               cursor={{ fill: theme.barCursor, radius: 8 }}
               content={({ active, label, payload }) => (
@@ -478,14 +314,14 @@ function PaymentTypeBlock({ data }: { data: Bucket[] }) {
                 />
               )}
             />
-            <Bar dataKey="value" radius={[6, 6, 0, 0]} maxBarSize={56} isAnimationActive={false} shape={growingColumnShape('value', 6)}>
-              {data.map((d, i) => (
-                <Cell key={d.key} fill={`url(#pt-${uid}-${i})`} />
+            <Bar dataKey="value" radius={[6, 6, 0, 0]} maxBarSize={44} isAnimationActive={false} shape={growingColumnShape('value', 6)}>
+              {data.map((d) => (
+                <Cell key={d.key} fill={SERIES_BLUE} />
               ))}
               <LabelList
                 dataKey="value"
                 content={(labelProps) => (
-                  <FadeInTopLabel {...(labelProps as unknown as ChartLabelProps)} color={theme.chartLabel} format={brlCompact} />
+                  <FadeInTopLabel {...(labelProps as unknown as ChartLabelProps)} color={theme.chartLabel} fontSize={11} format={compactAxis} />
                 )}
               />
             </Bar>
@@ -520,36 +356,34 @@ function PaymentTypeBlock({ data }: { data: Bucket[] }) {
 
 function ConditionBlock({ data, total }: { data: Bucket[]; total: number }) {
   const theme = useChartTheme();
-  const uid = React.useId().replace(/:/g, '');
   if (!data.length) return <ChartEmpty icon={ReceiptText} />;
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
       <div className="h-[280px] w-full">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data} margin={{ top: 18, right: 8, bottom: 4, left: 4 }} barCategoryGap="22%">
-            <BarGradients idPrefix={`cd-${uid}`} colors={['#0f766e']} />
+          <BarChart data={data} margin={{ top: 22, right: 10, bottom: 4, left: 0 }} barCategoryGap="28%">
             <CartesianGrid strokeDasharray="4 6" stroke={theme.chartGrid} vertical={false} />
-            <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fill: theme.chartTick, fontSize: 10 }} interval={0} tickFormatter={(v: string) => truncate(v, 12)} />
-            <YAxis tickLine={false} axisLine={false} width={64} tick={{ fill: theme.chartTick, fontSize: 11 }} tickFormatter={(v) => brlCompact(Number(v))} />
+            <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={6} tick={{ fill: theme.chartTick, fontSize: 11, fontWeight: 500 }} interval={0} tickFormatter={(v: string) => truncate(v, 12)} />
+            <YAxis tickLine={false} axisLine={false} width={44} tick={{ fill: theme.chartTick, fontSize: 10 }} tickFormatter={(v) => compactAxis(Number(v))} />
             <Tooltip
               cursor={{ fill: theme.barCursor, radius: 8 }}
               content={({ active, label, payload }) => (
                 <ChartLightTooltip
                   active={active}
                   label={label}
-                  rows={(payload ?? []).map((e) => ({ key: 'v', name: 'Valor', value: brl(Number(e.value) || 0), color: '#0f766e' }))}
+                  rows={(payload ?? []).map((e) => ({ key: 'v', name: 'Valor', value: brl(Number(e.value) || 0), color: SERIES_BLUE }))}
                 />
               )}
             />
-            <Bar dataKey="value" fill={`url(#cd-${uid}-0)`}radius={[6, 6, 0, 0]} maxBarSize={48} isAnimationActive={false} shape={growingColumnShape('value', 6)}>
+            <Bar dataKey="value" fill={SERIES_BLUE} radius={[6, 6, 0, 0]} maxBarSize={44} isAnimationActive={false} shape={growingColumnShape('value', 6)}>
               <LabelList
                 dataKey="value"
                 content={(labelProps) => (
                   <FadeInTopLabel
                     {...(labelProps as unknown as ChartLabelProps)}
                     color={theme.chartLabel}
-                    fontSize={10}
-                    format={brlCompact}
+                    fontSize={11}
+                    format={compactAxis}
                   />
                 )}
               />
@@ -762,7 +596,7 @@ function PaidGaugeCard({ paid, total }: { paid: number; total: number }) {
   return (
     <Card className={`${cadastroListClasses.card} flex min-h-0 flex-col`}>
       <CardHeader className={`${cadastroListClasses.cardHeader} !pt-5`}>
-        <SectionTitle icon={Gauge} title="Progresso" iconBg="bg-emerald-100 dark:bg-emerald-900/30" iconColor="text-emerald-600 dark:text-emerald-400" />
+        <SectionTitle icon={Gauge} title="Progresso" />
       </CardHeader>
       <CardContent className={`${cadastroListClasses.cardContent} flex min-h-0 flex-1 flex-col !pt-1`}>
         <div className="flex min-h-0 flex-1 items-center justify-center">
@@ -842,6 +676,134 @@ function AnimatedKpiCard({
   );
 }
 
+/** Cartão de módulo (como Orçamentos / Cronogramas / Diários de Obra do contrato). */
+function ModuleCard({
+  icon,
+  iconBg,
+  iconColor,
+  title,
+  children,
+  footerLeft,
+  footerHref,
+  footerLabel = 'Ver detalhes',
+  className,
+}: {
+  icon: LucideIcon;
+  iconBg: string;
+  iconColor: string;
+  title: string;
+  children: React.ReactNode;
+  footerLeft?: React.ReactNode;
+  footerHref?: string;
+  footerLabel?: string;
+  className?: string;
+}) {
+  return (
+    <Card className={`${cadastroListClasses.card} flex h-full min-h-0 flex-col ${className || ''}`}>
+      <CardHeader className={`${cadastroListClasses.cardHeader} !pt-5`}>
+        <SectionTitle icon={icon} title={title} iconBg={iconBg} iconColor={iconColor} />
+      </CardHeader>
+      <CardContent className={`${cadastroListClasses.cardContent} flex min-h-0 flex-1 flex-col gap-4`}>
+        <div className="flex-1 space-y-4">{children}</div>
+        {footerLeft || footerHref ? (
+          <div className="flex items-center justify-between gap-3 border-t border-gray-200 pt-3 text-xs dark:border-gray-700">
+            <span className="min-w-0 truncate text-gray-500 dark:text-gray-400">{footerLeft}</span>
+            {footerHref ? (
+              <Link href={footerHref} className="shrink-0 font-semibold text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300">
+                {footerLabel} ›
+              </Link>
+            ) : null}
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Bloco colorido com número (verde, amarelo, vermelho ou azul), como os do cartão de Orçamentos. */
+function StatTile({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone: 'green' | 'amber' | 'red' | 'blue' }) {
+  const tones = {
+    green: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300',
+    amber: 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300',
+    red: 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300',
+    blue: 'bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300',
+  } as const;
+  return (
+    <div className={`rounded-xl px-3 py-2.5 ${tones[tone]}`}>
+      <p className="text-[11px] font-medium opacity-90">{label}</p>
+      <p className="mt-0.5 truncate text-sm font-semibold tabular-nums">{value}</p>
+      {sub ? <p className="text-[11px] opacity-80">{sub}</p> : null}
+    </div>
+  );
+}
+
+/** Faixa de aviso (verde quando está tudo certo, vermelha ou amarela quando precisa de atenção). */
+function NoticeBar({ tone, children }: { tone: 'green' | 'amber' | 'red'; children: React.ReactNode }) {
+  const tones = {
+    green: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300',
+    amber: 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300',
+    red: 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300',
+  } as const;
+  return <div className={`rounded-lg px-3 py-2 text-xs font-semibold ${tones[tone]}`}>{children}</div>;
+}
+
+/** Lista com barra fina de progresso: rótulo à esquerda, valor à direita (como Faturamento estimado / Custo estimado). */
+function RankProgressList({
+  data,
+  icon,
+  showPercent = false,
+  color = SERIES_BLUE,
+  getValue = (b: Bucket) => b.value,
+}: {
+  data: Bucket[];
+  icon: LucideIcon;
+  showPercent?: boolean;
+  color?: string;
+  getValue?: (b: Bucket) => number;
+}) {
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    if (prefersReducedMotion()) {
+      setOn(true);
+      return;
+    }
+    const id = requestAnimationFrame(() => setOn(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+  const rows = data.filter((b) => getValue(b) > 0);
+  if (!rows.length) return <ChartEmpty icon={icon} />;
+  const max = Math.max(...rows.map(getValue), 1);
+  const sum = rows.reduce((acc, b) => acc + getValue(b), 0);
+  return (
+    <ul className="space-y-3.5">
+      {rows.map((b, i) => {
+        const v = getValue(b);
+        return (
+          <li key={b.key}>
+            <div className="flex items-baseline justify-between gap-3 text-xs">
+              <span className="min-w-0 truncate font-medium text-gray-700 dark:text-gray-300" title={b.label}>
+                {b.label}
+              </span>
+              <span className="shrink-0 font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+                {brl(v)}
+                {showPercent && sum > 0 ? (
+                  <span className="ml-2 font-normal text-gray-500 dark:text-gray-400">{(Math.round((v / sum) * 1000) / 10).toLocaleString('pt-BR')}%</span>
+                ) : null}
+              </span>
+            </div>
+            <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700/70">
+              <div
+                className="h-full rounded-full transition-[width] duration-700 ease-out"
+                style={{ width: on ? `${Math.max(2, (v / max) * 100)}%` : '0%', backgroundColor: color, transitionDelay: `${Math.min(i, 12) * 60}ms` }}
+              />
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 function FilterField({ label, className = '', children }: { label: string; className?: string; children: React.ReactNode }) {
   return (
     <div className={className}>
@@ -855,27 +817,16 @@ function DashboardBoletosPage() {
   const handleLogout = useLogout();
   const user = authService.getUser();
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
-  const [exportando, setExportando] = useState<'pdf' | 'excel' | null>(null);
-  const chartsRef = useRef<HTMLDivElement>(null);
-  const { isDark, toggleTheme } = useTheme();
+  const [showFilters, setShowFilters] = useState(false);
 
-  // Parâmetros enviados ao servidor (listas vão como polo=a&polo=b).
-  const params = useMemo(() => {
-    const out: Record<string, string | string[]> = {};
-    if (filters.polo.length) out.polo = filters.polo;
-    if (filters.costCenter.length) out.costCenter = filters.costCenter;
-    if (filters.manager.length) out.manager = filters.manager;
-    if (filters.supplier.length) out.supplier = filters.supplier;
-    if (filters.status) out.status = filters.status;
-    if (filters.dueFrom) out.dueFrom = filters.dueFrom;
-    if (filters.dueTo) out.dueTo = filters.dueTo;
-    return out;
-  }, [filters]);
+  const params = useMemo(
+    () => Object.fromEntries(Object.entries(filters).filter(([, v]) => v)) as Partial<Filters>,
+    [filters],
+  );
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['boleto-control-dashboard', params],
-    queryFn: async () =>
-      (await api.get('/boleto-control/dashboard', { params, paramsSerializer: { indexes: null } })).data?.data as Dashboard,
+    queryFn: async () => (await api.get('/boleto-control/dashboard', { params })).data?.data as Dashboard,
     enabled: !!user,
     placeholderData: (prev) => prev,
   });
@@ -883,181 +834,38 @@ function DashboardBoletosPage() {
   const { data: options } = useQuery({
     queryKey: ['boleto-control-options'],
     queryFn: async () =>
-      (await api.get('/boleto-control/options')).data?.data as {
-        polos: string[];
-        costCenters: string[];
-        managers: string[];
-        suppliers?: string[];
-      },
+      (await api.get('/boleto-control/options')).data?.data as { polos: string[]; costCenters: string[]; managers: string[] },
     enabled: !!user,
     staleTime: 60_000,
   });
 
-  const filtersActive =
-    filters.polo.length + filters.costCenter.length + filters.manager.length + filters.supplier.length > 0 ||
-    !!filters.status ||
-    !!filters.dueFrom ||
-    !!filters.dueTo;
-  const setLista = (k: 'polo' | 'costCenter' | 'manager' | 'supplier') => (v: string[]) => setFilters((p) => ({ ...p, [k]: v }));
-  const escolherPeriodo = (v: string) => {
-    const iv = intervaloDoPeriodo(v);
-    setFilters((p) => ({ ...p, periodo: v, ...(iv ?? (v ? {} : { dueFrom: '', dueTo: '' })) }));
-  };
-  const setData = (k: 'dueFrom' | 'dueTo') => (v: string) => setFilters((p) => ({ ...p, periodo: 'personalizado', [k]: v }));
-  const opt = (lista?: string[]) => (lista ?? []).map((v) => ({ value: v, label: v }));
+  const [exporting, setExporting] = useState<'excel' | 'pdf' | null>(null);
 
-  /** Filtros ativos em texto (para o relatório). */
-  const filtrosTexto = (): string[] => {
-    const out: string[] = [];
-    if (filters.dueFrom || filters.dueTo) {
-      const nome = PERIODOS.find((p) => p.value === filters.periodo && p.value !== 'personalizado')?.label;
-      const partes = [filters.dueFrom ? `de ${fmtYmd(filters.dueFrom)}` : '', filters.dueTo ? `até ${fmtYmd(filters.dueTo)}` : '']
-        .filter(Boolean)
-        .join(' ');
-      out.push(`Vencimento ${partes}${nome ? ` (${nome})` : ''}`);
+  /** Exporta os indicadores que estão na tela (já com os filtros aplicados). */
+  const handleExport = async (kind: 'excel' | 'pdf') => {
+    if (!data) return;
+    const lines: ExportFilterLine[] = [];
+    if (filters.polo) lines.push({ label: 'Polo', value: filters.polo });
+    if (filters.costCenter) lines.push({ label: 'Centro de custo', value: filters.costCenter });
+    if (filters.manager) lines.push({ label: 'Gestor', value: filters.manager });
+    if (filters.status) {
+      lines.push({ label: 'Situação', value: STATUS_OPTIONS.find((o) => o.value === filters.status)?.label ?? filters.status });
     }
-    if (filters.status) out.push(`Situação: ${STATUS_LABEL[filters.status] ?? filters.status}`);
-    if (filters.polo.length) out.push(`Polo: ${filters.polo.join(', ')}`);
-    if (filters.costCenter.length) out.push(`Centro de custo: ${filters.costCenter.join(', ')}`);
-    if (filters.manager.length) out.push(`Gestor: ${filters.manager.join(', ')}`);
-    if (filters.supplier.length) out.push(`Fornecedor: ${filters.supplier.join(', ')}`);
-    return out;
-  };
-
-  /** Monta o relatório (mesmos filtros da tela) com as listas completas do servidor. */
-  const montarRelatorio = async (): Promise<DashReport> => {
-    const res = await api.get('/boleto-control/dashboard', {
-      params: { ...params, export: '1' },
-      paramsSerializer: { indexes: null },
-      timeout: 180_000,
-    });
-    const d = res.data?.data as Dashboard & {
-      rows?: Array<{
-        supplierName: string | null;
-        ocNumber: string | null;
-        idMov: string | null;
-        nfNumber: string | null;
-        costCenterName: string | null;
-        manager: string;
-        polo: string | null;
-        paymentCondition: string | null;
-        value: number;
-        dueDate: string | null;
-        status: string;
-      }>;
-    };
-    const tt = d.totals;
-    const pct = (v: number) => (tt.all.value > 0 ? Math.round((v / tt.all.value) * 10000) / 100 : 0);
-    const bucketTable = (title: string, sheet: string, label: string, data: Bucket[], ordenarPorChave = false): DashReportTable => {
-      const lista = ordenarPorChave ? data : [...data].sort((a, b) => b.value - a.value);
-      return {
-        title,
-        sheet,
-        headers: [label, 'Qtd.', 'Valor total', 'Pago', 'À vencer', 'Vencido', '% do total'],
-        numeric: [false, true, true, true, true, true, true],
-        rows: lista.map((b) => [ordenarPorChave ? monthLabel(b.key) : b.label, b.count, b.value, b.pago, b.aVencer, b.vencido, pct(b.value)]),
-        total: [
-          'Total',
-          lista.reduce((s, b) => s + b.count, 0),
-          lista.reduce((s, b) => s + b.value, 0),
-          lista.reduce((s, b) => s + b.pago, 0),
-          lista.reduce((s, b) => s + b.aVencer, 0),
-          lista.reduce((s, b) => s + b.vencido, 0),
-          lista.length ? 100 : 0,
-        ],
-      };
-    };
-    const tables: DashReportTable[] = [
-      bucketTable('Valor por mês de vencimento', 'Por mês', 'Mês', d.byMonth, true),
-      bucketTable('Valor por polo', 'Por polo', 'Polo', d.byPolo),
-      bucketTable('Valor por gestor', 'Por gestor', 'Gestor', d.byManager),
-      bucketTable('Valor por centro de custo', 'Por centro de custo', 'Centro de custo', d.byCostCenter),
-      bucketTable('Valor por fornecedor', 'Por fornecedor', 'Fornecedor', d.bySupplier),
-      bucketTable('Total por tipo de pagamento', 'Por tipo de pagamento', 'Tipo de pagamento', (d.byPaymentType ?? []).filter((b) => b.count > 0)),
-      bucketTable('Condições de pagamento', 'Por condição', 'Condição', d.byCondition ?? []),
-    ];
-    const rowsBoletos = d.rows ?? [];
-    const boletos: DashReportTable = {
-      title: 'Boletos',
-      sheet: 'Boletos',
-      headers: ['Fornecedor', 'OC', 'IdMov', 'NF', 'Centro de custo', 'Gestor', 'Polo', 'Condição', 'Vencimento', 'Situação', 'Valor'],
-      numeric: [false, false, false, false, false, false, false, false, false, false, true],
-      rows: rowsBoletos.map((b) => [
-        b.supplierName ?? '',
-        b.ocNumber ?? '',
-        b.idMov ?? '',
-        b.nfNumber ?? '',
-        b.costCenterName ?? '',
-        b.manager ?? '',
-        b.polo ?? '',
-        b.paymentCondition ?? '',
-        b.dueDate ? fmtYmd(b.dueDate) : '',
-        STATUS_LABEL[b.status] ?? b.status,
-        b.value,
-      ]),
-      total: ['Total', '', '', '', '', '', '', '', '', `${rowsBoletos.length} boleto(s)`, rowsBoletos.reduce((s, b) => s + b.value, 0)],
-    };
-    const qtd = (n: number) => `${n.toLocaleString('pt-BR')} boletos`;
-    const kpisR = [
-      { label: 'Total em boletos', value: brl(tt.all.value), detail: qtd(tt.all.count) },
-      { label: 'Pagos', value: brl(tt.PAGO.value), detail: `${qtd(tt.PAGO.count)} · ${pct(tt.PAGO.value).toLocaleString('pt-BR')}%` },
-      { label: 'Em aberto', value: brl(tt.A_VENCER.value + tt.VENCIDO.value), detail: qtd(tt.A_VENCER.count + tt.VENCIDO.count) },
-      { label: 'À vencer', value: brl(tt.A_VENCER.value), detail: qtd(tt.A_VENCER.count) },
-      { label: 'Vencidos', value: brl(tt.VENCIDO.value), detail: qtd(tt.VENCIDO.count) },
-      { label: 'Vencem em 30 dias', value: brl(d.next30.value), detail: qtd(d.next30.count) },
-      { label: 'Valor médio por boleto', value: brl(tt.all.count ? tt.all.value / tt.all.count : 0) },
-    ];
-    return {
-      title: 'Dashboard de Boletos',
-      filtros: filtrosTexto(),
-      kpis: kpisR,
-      charts: [],
-      tables,
-      boletos,
-      fileBase: `Dashboard-boletos-${ymd(new Date())}`,
-    };
-  };
-
-  /** Fotografa os gráficos da tela (tema claro, para impressão). */
-  const capturarGraficos = async (): Promise<DashReportChart[]> => {
-    const root = chartsRef.current;
-    if (!root) return [];
-    const voltarEscuro = isDark;
-    if (voltarEscuro) {
-      toggleTheme();
-      await new Promise((r) => setTimeout(r, 1200));
-    }
+    if (filters.dueFrom) lines.push({ label: 'Vencimento de', value: filters.dueFrom });
+    if (filters.dueTo) lines.push({ label: 'Vencimento até', value: filters.dueTo });
+    setExporting(kind);
     try {
-      const nodes = Array.from(root.querySelectorAll<HTMLElement>('[data-export-chart]'));
-      const out: DashReportChart[] = [];
-      for (const node of nodes) {
-        const rect = node.getBoundingClientRect();
-        if (rect.width < 10 || rect.height < 10) continue;
-        const dataUrl = await toPng(node, { backgroundColor: '#ffffff', pixelRatio: 2, cacheBust: true });
-        out.push({ title: node.dataset.exportChart || '', dataUrl, widthPx: rect.width, heightPx: rect.height });
-      }
-      return out;
+      if (kind === 'excel') await exportDashboardExcel(data, lines);
+      else await exportDashboardPdf(data, lines);
+    } catch {
+      toast.error('Não foi possível exportar. Tente novamente.');
     } finally {
-      if (voltarEscuro) toggleTheme();
+      setExporting(null);
     }
   };
 
-  const exportar = async (tipo: 'pdf' | 'excel') => {
-    setExportando(tipo);
-    try {
-      const rel = await montarRelatorio();
-      if (tipo === 'pdf') {
-        rel.charts = await capturarGraficos();
-        await exportDashboardBoletosPdf(rel);
-      } else {
-        await exportDashboardBoletosExcel(rel);
-      }
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Não foi possível gerar o relatório.');
-    } finally {
-      setExportando(null);
-    }
-  };
+  const filtersActive = Object.values(filters).some((v) => v !== '');
+  const setFilter = (k: keyof Filters) => (v: string) => setFilters((p) => ({ ...p, [k]: v }));
 
   if (!user) {
     return (
@@ -1073,8 +881,6 @@ function DashboardBoletosPage() {
     { key: 'pago', label: 'Pagos', count: t?.PAGO.count ?? 0, value: t?.PAGO.value ?? 0, Icon: CircleCheck, bg: 'bg-emerald-100 dark:bg-emerald-900/30', color: 'text-emerald-600 dark:text-emerald-300' },
     { key: 'avencer', label: 'À vencer', count: t?.A_VENCER.count ?? 0, value: t?.A_VENCER.value ?? 0, Icon: Clock, bg: 'bg-amber-100 dark:bg-amber-900/30', color: 'text-amber-600 dark:text-amber-300' },
     { key: 'vencido', label: 'Vencidos', count: t?.VENCIDO.count ?? 0, value: t?.VENCIDO.value ?? 0, Icon: AlertTriangle, bg: 'bg-red-100 dark:bg-red-900/30', color: 'text-red-600 dark:text-red-300' },
-    { key: 'media', label: 'Valor médio por boleto', count: 0, value: t && t.all.count ? t.all.value / t.all.count : 0, Icon: Calculator, bg: 'bg-teal-100 dark:bg-teal-900/30', color: 'text-teal-600 dark:text-teal-300' },
-    { key: 'next30', label: 'Vencem em 30 dias', count: data?.next30.count ?? 0, value: data?.next30.value ?? 0, Icon: CalendarClock, bg: 'bg-purple-100 dark:bg-purple-900/30', color: 'text-purple-600 dark:text-purple-300' },
   ];
 
   return (
@@ -1085,109 +891,7 @@ function DashboardBoletosPage() {
           description="Indicadores de pagos, à vencer e vencidos por polo, gestor, centro de custo e mês de vencimento"
         />
 
-        <Card className={cadastroListClasses.card}>
-          <CardHeader className={cadastroListClasses.cardHeader}>
-            <div className={cadastroListClasses.cardHeaderRow}>
-              <SectionTitle icon={ListFilter} title="Filtros" subtitle="Período de vencimento, situação, centro de custo, polo, gestor e fornecedor" />
-              <div className="flex flex-wrap items-center gap-2">
-                {filtersActive ? (
-                  <button
-                    type="button"
-                    onClick={() => setFilters(EMPTY_FILTERS)}
-                    className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
-                  >
-                    <FilterX className="h-4 w-4 shrink-0" />
-                    <span>Limpar filtros</span>
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={() => void exportar('excel')}
-                  disabled={!!exportando || isLoading}
-                  className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
-                  title="Exportar relatório em Excel (com os filtros aplicados)"
-                >
-                  {exportando === 'excel' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                  Excel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void exportar('pdf')}
-                  disabled={!!exportando || isLoading}
-                  className="flex h-10 items-center gap-2 rounded-lg bg-red-600 px-3 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:opacity-60"
-                  title="Exportar relatório em PDF, com gráficos (com os filtros aplicados)"
-                >
-                  {exportando === 'pdf' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
-                  {exportando === 'pdf' ? 'Gerando PDF...' : 'PDF'}
-                </button>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className={cadastroListClasses.cardContent}>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <FilterField label="Período (vencimento)">
-                <StringSingleSelectDropdown
-                  value={filters.periodo}
-                  onChange={escolherPeriodo}
-                  options={PERIODOS.map((p) => ({ value: p.value, label: p.label }))}
-                  placeholder="Todo o período"
-                  emptyOptionLabel="Todo o período"
-                  allowEmpty
-                  disableSearch
-                  matchTriggerWidth
-                />
-              </FilterField>
-              <FilterField label="Vencimento de">
-                <DatePickerField value={filters.dueFrom} onChange={setData('dueFrom')} placeholder="dd/mm/aaaa" aria-label="Vencimento a partir de" />
-              </FilterField>
-              <FilterField label="Vencimento até">
-                <DatePickerField value={filters.dueTo} onChange={setData('dueTo')} placeholder="dd/mm/aaaa" aria-label="Vencimento até" />
-              </FilterField>
-              <FilterField label="Situação">
-                <StringSingleSelectDropdown
-                  value={filters.status}
-                  onChange={(v) => setFilters((p) => ({ ...p, status: v }))}
-                  options={STATUS_OPCOES}
-                  placeholder="Todas"
-                  emptyOptionLabel="Todas"
-                  allowEmpty
-                  disableSearch
-                  matchTriggerWidth
-                />
-              </FilterField>
-              <FilterField label="Centro de custo">
-                <MultiSelectSearchDropdown options={opt(options?.costCenters)} selected={filters.costCenter} onChange={setLista('costCenter')} placeholder="Todos" searchPlaceholder="Pesquisar centro de custo..." listMaxHeight={320} noFocusRing />
-              </FilterField>
-              <FilterField label="Polo">
-                <MultiSelectSearchDropdown options={opt(options?.polos)} selected={filters.polo} onChange={setLista('polo')} placeholder="Todos" searchPlaceholder="Pesquisar polo..." listMaxHeight={320} noFocusRing />
-              </FilterField>
-              <FilterField label="Gestor">
-                <MultiSelectSearchDropdown options={opt(options?.managers)} selected={filters.manager} onChange={setLista('manager')} placeholder="Todos" searchPlaceholder="Pesquisar gestor..." listMaxHeight={320} noFocusRing />
-              </FilterField>
-              <FilterField label="Fornecedor">
-                <MultiSelectSearchDropdown options={opt(options?.suppliers)} selected={filters.supplier} onChange={setLista('supplier')} placeholder="Todos" searchPlaceholder="Pesquisar fornecedor..." listMaxHeight={320} noFocusRing />
-              </FilterField>
-            </div>
-          </CardContent>
-        </Card>
-
-        <div ref={chartsRef} className="flex flex-col gap-6">
-        {!isError ? (
-          <div className="grid grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-3">
-            <div className="h-full lg:col-span-2" data-export-chart="Total em boletos por mês de vencimento">
-              <TotalAreaCard
-                total={t?.all.value ?? 0}
-                paidPct={t && t.all.value > 0 ? (t.PAGO.value / t.all.value) * 100 : 0}
-                byMonth={data?.byMonth ?? []}
-              />
-            </div>
-            <div className="h-full" data-export-chart="Progresso de pagamento">
-              <PaidGaugeCard paid={t?.PAGO.value ?? 0} total={t?.all.value ?? 0} />
-            </div>
-          </div>
-        ) : null}
-
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-4">
           {kpis.map((k, i) => (
             <AnimatedKpiCard
               key={k.key}
@@ -1204,6 +908,100 @@ function DashboardBoletosPage() {
           ))}
         </div>
 
+        {!isError ? (
+          <div className="grid grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-3">
+            <div className="h-full lg:col-span-2">
+              <TotalAreaCard
+                total={t?.all.value ?? 0}
+                paidPct={t && t.all.value > 0 ? (t.PAGO.value / t.all.value) * 100 : 0}
+                byMonth={data?.byMonth ?? []}
+              />
+            </div>
+            <PaidGaugeCard paid={t?.PAGO.value ?? 0} total={t?.all.value ?? 0} />
+          </div>
+        ) : null}
+
+        <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => void handleExport('excel')}
+            disabled={!data || exporting !== null}
+            className="inline-flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+            title="Exportar os indicadores filtrados para Excel"
+          >
+            {exporting === 'excel' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
+            <span className="hidden sm:inline">Excel</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleExport('pdf')}
+            disabled={!data || exporting !== null}
+            className="inline-flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+            title="Exportar os indicadores filtrados para PDF"
+          >
+            {exporting === 'pdf' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+            <span className="hidden sm:inline">PDF</span>
+          </button>
+          <div className={cadastroListClasses.filterIconButtonWrap}>
+            <button
+              type="button"
+              onClick={() => setShowFilters((p) => !p)}
+              className={`${cadastroListClasses.filterIconButton} transition-colors ${
+                showFilters || filtersActive
+                  ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
+                  : 'border-gray-300 bg-white text-gray-800 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700'
+              }`}
+              aria-expanded={showFilters}
+              aria-label="Abrir filtros"
+              title={filtersActive ? 'Filtros ativos' : 'Filtros'}
+            >
+              <Filter className="h-4 w-4" />
+              {filtersActive ? <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" /> : null}
+            </button>
+          </div>
+        </div>
+
+        {showFilters ? (
+          <Card className={cadastroListClasses.card}>
+            <CardHeader className={cadastroListClasses.cardHeader}>
+              <div className={cadastroListClasses.cardHeaderRow}>
+                <SectionTitle icon={ListFilter} title="Filtros" subtitle="Recorte os indicadores por polo, centro de custo, gestor, situação e período de vencimento" />
+                {filtersActive ? (
+                  <button
+                    type="button"
+                    onClick={() => setFilters(EMPTY_FILTERS)}
+                    className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+                  >
+                    <FilterX className="h-4 w-4 shrink-0" />
+                    <span>Limpar filtros</span>
+                  </button>
+                ) : null}
+              </div>
+            </CardHeader>
+            <CardContent className={cadastroListClasses.cardContent}>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
+                <FilterField label="Polo">
+                  <StringSingleSelectDropdown value={filters.polo} onChange={setFilter('polo')} options={options?.polos ?? []} placeholder="Todos" emptyOptionLabel="Todos" matchTriggerWidth />
+                </FilterField>
+                <FilterField label="Centro de custo">
+                  <StringSingleSelectDropdown value={filters.costCenter} onChange={setFilter('costCenter')} options={options?.costCenters ?? []} placeholder="Todos" emptyOptionLabel="Todos" matchTriggerWidth />
+                </FilterField>
+                <FilterField label="Gestor">
+                  <StringSingleSelectDropdown value={filters.manager} onChange={setFilter('manager')} options={options?.managers ?? []} placeholder="Todos" emptyOptionLabel="Todos" matchTriggerWidth />
+                </FilterField>
+                <FilterField label="Situação">
+                  <StringSingleSelectDropdown value={filters.status} onChange={setFilter('status')} options={STATUS_OPTIONS} placeholder="Todas" emptyOptionLabel="Todas" matchTriggerWidth />
+                </FilterField>
+                <FilterField label="Vencimento de">
+                  <DatePickerField value={filters.dueFrom} onChange={setFilter('dueFrom')} placeholder="dd/mm/aaaa" aria-label="Vencimento a partir de" />
+                </FilterField>
+                <FilterField label="Vencimento até">
+                  <DatePickerField value={filters.dueTo} onChange={setFilter('dueTo')} placeholder="dd/mm/aaaa" aria-label="Vencimento até" />
+                </FilterField>
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
 
         {isLoading ? (
           <Loading message="Carregando indicadores..." size="lg" />
@@ -1212,45 +1010,133 @@ function DashboardBoletosPage() {
             <CardContent className="py-10 text-center text-sm text-gray-700 dark:text-gray-300">Não foi possível carregar os indicadores.</CardContent>
           </Card>
         ) : (
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <ChartCard exportChart="Valor por mês de vencimento" icon={CalendarRange} title="Valor por mês de vencimento" iconBg="bg-sky-100 dark:bg-sky-900/30" iconColor="text-sky-600 dark:text-sky-400" subtitle="Pago, à vencer e vencido" className="lg:col-span-2">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+            <ChartCard
+              title="Valor por mês de vencimento"
+              subtitle={
+                <>
+                  Boletos de cada mês de vencimento, somando <strong className="text-gray-800 dark:text-gray-100">{brlCompact(data.totals.all.value)}</strong> em{' '}
+                  <strong className="text-gray-800 dark:text-gray-100">{data.byMonth.length}</strong> {data.byMonth.length === 1 ? 'mês' : 'meses'}.
+                </>
+              }
+              legend={
+                <>
+                  <LegendDot color={STATUS_COLORS.pago} label="Pago" />
+                  <LegendDot color={STATUS_COLORS.aVencer} label="À vencer" />
+                  <LegendDot color={STATUS_COLORS.vencido} label="Vencido" />
+                </>
+              }
+              className="lg:col-span-3"
+            >
               <MonthlyChart data={data.byMonth} />
             </ChartCard>
 
-            <ChartCard icon={CalendarRange} title="Resumo mensal por polo" iconBg="bg-violet-100 dark:bg-violet-900/30" iconColor="text-violet-600 dark:text-violet-400" subtitle="Valor e quantidade por mês de vencimento" className="lg:col-span-2">
+            <ModuleCard
+              icon={Wallet}
+              iconBg="bg-blue-100 dark:bg-blue-900/30"
+              iconColor="text-blue-600 dark:text-blue-400"
+              title="Situação dos boletos"
+              footerLeft={`Valor médio: ${brl(data.totals.all.count ? data.totals.all.value / data.totals.all.count : 0)}`}
+              footerHref="/ponto/controle-boletos"
+              footerLabel="Ver boletos"
+            >
+              <div>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Valor total</p>
+                <p className="text-2xl font-semibold tabular-nums text-gray-900 dark:text-gray-50">{brl(data.totals.all.value)}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">{data.totals.all.count.toLocaleString('pt-BR')} boletos</p>
+              </div>
+              <div className="grid grid-cols-2 gap-2.5">
+                <StatTile tone="green" label="Pagos" value={brlCompact(data.totals.PAGO.value)} sub={`${data.totals.PAGO.count.toLocaleString('pt-BR')} boletos`} />
+                <StatTile tone="amber" label="À vencer" value={brlCompact(data.totals.A_VENCER.value)} sub={`${data.totals.A_VENCER.count.toLocaleString('pt-BR')} boletos`} />
+                <StatTile tone="red" label="Vencidos" value={brlCompact(data.totals.VENCIDO.value)} sub={`${data.totals.VENCIDO.count.toLocaleString('pt-BR')} boletos`} />
+                <StatTile
+                  tone="blue"
+                  label="Em aberto"
+                  value={brlCompact(data.totals.A_VENCER.value + data.totals.VENCIDO.value)}
+                  sub={`${(data.totals.A_VENCER.count + data.totals.VENCIDO.count).toLocaleString('pt-BR')} boletos`}
+                />
+              </div>
+            </ModuleCard>
+
+            <ModuleCard
+              icon={AlertTriangle}
+              iconBg="bg-red-100 dark:bg-red-900/30"
+              iconColor="text-red-600 dark:text-red-400"
+              title="Vencidos"
+              footerLeft="Quem concentra os vencidos"
+              footerHref="/ponto/controle-boletos"
+              footerLabel="Ver na lista"
+            >
+              <div>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Valor vencido</p>
+                <p className="text-2xl font-semibold tabular-nums text-gray-900 dark:text-gray-50">{brl(data.totals.VENCIDO.value)}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">{data.totals.VENCIDO.count.toLocaleString('pt-BR')} boletos</p>
+              </div>
+              {data.totals.VENCIDO.count === 0 ? (
+                <NoticeBar tone="green">Nenhum boleto vencido</NoticeBar>
+              ) : (
+                <NoticeBar tone="red">
+                  {data.totals.VENCIDO.count.toLocaleString('pt-BR')} {data.totals.VENCIDO.count === 1 ? 'boleto vencido' : 'boletos vencidos'}
+                </NoticeBar>
+              )}
+              <RankProgressList data={[...data.byCostCenter].sort((x, y) => y.vencido - x.vencido).slice(0, 4)} icon={AlertTriangle} color={STATUS_COLORS.vencido} getValue={(b) => b.vencido} />
+            </ModuleCard>
+
+            <ModuleCard
+              icon={CalendarClock}
+              iconBg="bg-purple-100 dark:bg-purple-900/30"
+              iconColor="text-purple-600 dark:text-purple-400"
+              title="Próximos 30 dias"
+              footerLeft="Boletos que vencem em até 30 dias"
+              footerHref="/ponto/controle-boletos"
+              footerLabel="Ver na lista"
+            >
+              <div>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Valor a vencer</p>
+                <p className="text-2xl font-semibold tabular-nums text-gray-900 dark:text-gray-50">{brl(data.next30.value)}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">{data.next30.count.toLocaleString('pt-BR')} boletos</p>
+              </div>
+              {data.next30.count === 0 ? (
+                <NoticeBar tone="green">Nada vencendo nos próximos 30 dias</NoticeBar>
+              ) : (
+                <NoticeBar tone="amber">{data.next30.count.toLocaleString('pt-BR')} {data.next30.count === 1 ? 'boleto vence' : 'boletos vencem'} em até 30 dias</NoticeBar>
+              )}
+              <RankProgressList data={[...data.byCostCenter].sort((x, y) => y.aVencer - x.aVencer).slice(0, 4)} icon={CalendarClock} color={STATUS_COLORS.aVencer} getValue={(b) => b.aVencer} />
+            </ModuleCard>
+
+            <ModuleCard icon={Banknote} iconBg="bg-rose-100 dark:bg-rose-900/30" iconColor="text-rose-600 dark:text-rose-400" title="Valor por polo">
+              <RankProgressList data={data.byPolo} icon={Banknote} showPercent />
+            </ModuleCard>
+
+            <ModuleCard icon={UserCog} iconBg="bg-violet-100 dark:bg-violet-900/30" iconColor="text-violet-600 dark:text-violet-400" title="Valor por gestor">
+              <RankProgressList data={data.byManager} icon={UserCog} showPercent />
+            </ModuleCard>
+
+            <ModuleCard icon={Wallet} iconBg="bg-indigo-100 dark:bg-indigo-900/30" iconColor="text-indigo-600 dark:text-indigo-400" title="Centros de custo">
+              <RankProgressList data={data.byCostCenter.slice(0, 8)} icon={Wallet} />
+            </ModuleCard>
+
+            <ModuleCard icon={Truck} iconBg="bg-emerald-100 dark:bg-emerald-900/30" iconColor="text-emerald-600 dark:text-emerald-400" title="Fornecedores" className="lg:col-span-3">
+              <RankProgressList data={data.bySupplier.slice(0, 10)} icon={Truck} />
+            </ModuleCard>
+
+            <ChartCard title="Resumo mensal por polo" subtitle="Valor e quantidade por mês de vencimento" className="lg:col-span-3">
               <MonthlySummaryTable rows={data.byMonthPolo ?? []} polos={data.byPolo.map((p) => p.label)} />
             </ChartCard>
 
-            <ChartCard exportChart="Total por tipo de pagamento" icon={CreditCard} title="Total por tipo de pagamento" iconBg="bg-amber-100 dark:bg-amber-900/30" iconColor="text-amber-600 dark:text-amber-400" subtitle="Classificado pela condição de pagamento" className="lg:col-span-2">
+            <ChartCard title="Total por tipo de pagamento" subtitle="Classificado pela condição de pagamento" className="lg:col-span-3">
               <PaymentTypeBlock data={data.byPaymentType ?? []} />
             </ChartCard>
 
-            <ChartCard exportChart="Principais condições de pagamento" icon={ReceiptText} title="Principais condições de pagamento" iconBg="bg-teal-100 dark:bg-teal-900/30" iconColor="text-teal-600 dark:text-teal-400" subtitle="8 maiores por valor" className="lg:col-span-2">
+            <ChartCard title="Principais condições de pagamento" subtitle="8 maiores por valor" className="lg:col-span-3">
               <ConditionBlock data={data.byCondition ?? []} total={data.totals.all.value} />
             </ChartCard>
 
-            <ChartCard exportChart="Valor por polo" icon={Banknote} title="Valor por polo" iconBg="bg-rose-100 dark:bg-rose-900/30" iconColor="text-rose-600 dark:text-rose-400" subtitle="Distribuição do valor total">
-              <DonutChart data={data.byPolo} icon={Banknote} />
-            </ChartCard>
-
-            <ChartCard exportChart="Valor por gestor" icon={UserCog} title="Valor por gestor" iconBg="bg-violet-100 dark:bg-violet-900/30" iconColor="text-violet-600 dark:text-violet-400" subtitle="Centros de custo agrupados pelo gestor do contrato">
-              <RankBarChart data={data.byManager} icon={UserCog} />
-            </ChartCard>
-
-            <ChartCard exportChart="Valor por centro de custo (10 maiores)" icon={Wallet} title="Valor por centro de custo" iconBg="bg-indigo-100 dark:bg-indigo-900/30" iconColor="text-indigo-600 dark:text-indigo-400" subtitle="10 maiores">
-              <RankBarChart data={data.byCostCenter.slice(0, 10)} icon={Wallet} color="#1e40af" />
-            </ChartCard>
-
-            <ChartCard exportChart="Valor por fornecedor (10 maiores)" icon={Truck} title="Valor por fornecedor" iconBg="bg-emerald-100 dark:bg-emerald-900/30" iconColor="text-emerald-600 dark:text-emerald-400" subtitle="10 maiores">
-              <RankBarChart data={data.bySupplier.slice(0, 10)} icon={Truck} color="#0f766e" />
-            </ChartCard>
-
-            <ChartCard icon={Wallet} title="Todos os centros de custo" iconBg="bg-sky-100 dark:bg-sky-900/30" iconColor="text-sky-600 dark:text-sky-400" subtitle="Total no período, com % do período" className="lg:col-span-2">
+            <ChartCard title="Todos os centros de custo" subtitle="Total no período, com % do período" className="lg:col-span-3">
               <CostCenterTable data={data.byCostCenter} total={data.totals.all.value} />
             </ChartCard>
           </div>
         )}
-        </div>
       </PageStack>
     </MainLayout>
   );

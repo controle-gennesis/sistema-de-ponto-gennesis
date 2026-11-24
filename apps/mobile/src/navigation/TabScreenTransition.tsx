@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useRef } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Animated, Easing, StyleSheet } from 'react-native';
 import { useIsFocused, useNavigation, useNavigationState } from '@react-navigation/native';
 import { useTheme } from '../context/ThemeContext';
@@ -26,6 +26,11 @@ export default function TabScreenTransition({ children }: Props) {
   /** Perdeu o foco só porque uma página abriu por cima (aba não mudou): não faz o fade. */
   const coveredRef = useRef(false);
   const animRef = useRef<Animated.CompositeAnimation | null>(null);
+  /**
+   * Tela focada e parada: o contêiner larga opacidade e deslocamento animados. O vidro nativo do iOS 26
+   * (Liquid Glass) não desenha dentro de uma view com opacidade/transform animados.
+   */
+  const [settled, setSettled] = useState(focused);
 
   // Ao perder o foco, some rápido pra não ficar sobreposta com a próxima.
   useLayoutEffect(() => {
@@ -43,6 +48,7 @@ export default function TabScreenTransition({ children }: Props) {
       return;
     }
     animRef.current?.stop();
+    setSettled(false);
     animRef.current = Animated.timing(opacity, {
       toValue: 0,
       duration: 140,
@@ -60,6 +66,7 @@ export default function TabScreenTransition({ children }: Props) {
       prevIndexRef.current = index;
       opacity.setValue(1);
       translateX.setValue(0);
+      setSettled(true);
       return;
     }
 
@@ -69,6 +76,7 @@ export default function TabScreenTransition({ children }: Props) {
       animRef.current?.stop();
       opacity.setValue(1);
       translateX.setValue(0);
+      setSettled(true);
       return;
     }
 
@@ -77,6 +85,7 @@ export default function TabScreenTransition({ children }: Props) {
     const dir = index > from ? 1 : index < from ? -1 : 0;
 
     animRef.current?.stop();
+    setSettled(false);
     opacity.setValue(0);
     translateX.setValue(dir * 18);
 
@@ -94,7 +103,9 @@ export default function TabScreenTransition({ children }: Props) {
         useNativeDriver: true,
       }),
     ]);
-    animRef.current.start();
+    animRef.current.start(({ finished }) => {
+      if (finished) setSettled(true);
+    });
   }, [focused, index, opacity, translateX]);
 
   return (
@@ -104,8 +115,7 @@ export default function TabScreenTransition({ children }: Props) {
         {
           // Transparente pra o padrão do ThemeBackground aparecer (não cobrir com cinza).
           backgroundColor: colors.screenRoot,
-          opacity,
-          transform: [{ translateX }],
+          ...(settled ? null : { opacity, transform: [{ translateX }] }),
         },
       ]}
     >

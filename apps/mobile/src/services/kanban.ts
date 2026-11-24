@@ -35,6 +35,8 @@ export type KanbanCard = {
   materials?: number;
   comments: number;
   workHours?: number | null;
+  coverColor?: string | null;
+  coverSize?: 'NORMAL' | 'FULL';
   createdAt: string;
   completedAt?: string | null;
   checklistItems?: KanbanChecklistItem[];
@@ -223,6 +225,8 @@ export async function updateKanbanCard(
     checklistEnabled?: boolean;
     attachmentsEnabled?: boolean;
     workHours?: number | null;
+    coverColor?: string | null;
+    coverSize?: 'NORMAL' | 'FULL';
     completedAt?: string | null;
     archivedAt?: string | null;
   },

@@ -29,11 +29,12 @@ import {
   ListChecks,
   Calendar,
   LayoutGrid,
+  Search,
   X,
 } from 'lucide-react-native';
 import Svg, { Circle, Defs, LinearGradient as SvgLinearGradient, Rect, Stop } from 'react-native-svg';
 import Toast from 'react-native-toast-message';
-import AppHeader from '../../components/AppHeader';
+import AppHeader, { HeaderIconButton } from '../../components/AppHeader';
 import KanbanSheet from '../../components/KanbanSheet';
 import {
   ArchivedCardsModal,
@@ -42,9 +43,12 @@ import {
   labelTextColor,
 } from '../../components/KanbanBoardModals';
 import { MemberAvatar } from '../../components/KanbanMemberUi';
+import KanbanPresenceBar, { firstName, presenceActionLabel } from '../../components/KanbanPresenceBar';
+import { useKanbanCollab, type KanbanPresence } from '../../lib/kanbanCollab';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { resolveKanbanDefaultBoard } from '../../lib/kanbanDefaultBoard';
+import { coverHex, normalizeCoverSize } from '../../lib/kanbanCover';
 import {
   createKanbanCard,
   createKanbanColumn,
@@ -53,6 +57,7 @@ import {
   updateKanbanCard,
   type KanbanBoard,
   type KanbanCard,
+  type KanbanBoardSummary,
   type KanbanColumn,
   type Priority,
 } from '../../services/kanban';
@@ -128,20 +133,24 @@ function toHex(r: number, g: number, b: number) {
   return `#${[r, g, b].map((n) => n.toString(16).padStart(2, '0')).join('')}`;
 }
 
-/** Fundo da coluna = tint da bolinha (mesmo mix do web). */
+/** Fundo da coluna = tint da bolinha, meio transparente (a cor deixa o fundo da tela aparecer, como no web). */
 function getKanbanColumnBg(color: string | null | undefined, isDark: boolean): string {
   const accent = parseHexColor(color || '#6B7280') || { r: 107, g: 114, b: 128 };
-  if (isDark) {
-    return toHex(
-      mixChannel(accent.r, 31, 0.28),
-      mixChannel(accent.g, 41, 0.28),
-      mixChannel(accent.b, 55, 0.28),
-    );
-  }
+  return `rgba(${accent.r}, ${accent.g}, ${accent.b}, ${isDark ? 0.22 : 0.16})`;
+}
+
+/**
+ * Cor opaca equivalente ao fundo da coluna sobre o fundo da tela: usada só no esmaecido de baixo,
+ * que precisa esconder o fim dos cards (um fundo translúcido não esconderia nada).
+ */
+function getKanbanColumnFadeColor(color: string | null | undefined, isDark: boolean): string {
+  const accent = parseHexColor(color || '#6B7280') || { r: 107, g: 114, b: 128 };
+  const base = isDark ? { r: 17, g: 24, b: 39 } : { r: 244, g: 246, b: 248 };
+  const w = isDark ? 0.22 : 0.16;
   return toHex(
-    mixChannel(accent.r, 255, 0.22),
-    mixChannel(accent.g, 255, 0.22),
-    mixChannel(accent.b, 255, 0.22),
+    mixChannel(accent.r, base.r, w),
+    mixChannel(accent.g, base.g, w),
+    mixChannel(accent.b, base.b, w),
   );
 }
 
@@ -263,6 +272,7 @@ function BoardCardBase({
   readOnly,
   onPress,
   onToggleComplete,
+  presence,
 }: {
   card: KanbanCard;
   styles: ReturnType<typeof getStyles>;
@@ -271,6 +281,8 @@ function BoardCardBase({
   readOnly: boolean;
   onPress: (card: KanbanCard) => void;
   onToggleComplete: (card: KanbanCard) => void;
+  /** Outras pessoas com este cartão aberto ou sendo movido agora. */
+  presence?: KanbanPresence[];
 }) {
   const suppressOpenRef = useRef(false);
   const labels = Array.isArray(card.labels) ? card.labels : [];
@@ -281,19 +293,29 @@ function BoardCardBase({
   const priority = card.priority || 'medium';
   const priorityCfg = PRIORITY_CONFIG[priority] || PRIORITY_CONFIG.medium;
   const mutedBar = isDark ? '#4b5563' : '#d1d5db';
-  const divider = isDark ? 'rgba(75,85,99,0.75)' : '#f3f4f6';
-  const metaColor = isDark ? '#d1d5db' : '#4b5563';
-  const softColor = isDark ? '#9ca3af' : '#6b7280';
+  const fullCover = !!coverHex(card.coverColor) && normalizeCoverSize(card.coverSize) === 'FULL';
+  const divider = fullCover ? 'rgba(255,255,255,0.35)' : isDark ? 'rgba(75,85,99,0.75)' : '#f3f4f6';
+  const metaColor = fullCover ? 'rgba(255,255,255,0.92)' : isDark ? '#d1d5db' : '#4b5563';
+  const softColor = fullCover ? 'rgba(255,255,255,0.92)' : isDark ? '#9ca3af' : '#6b7280';
   const isCompleted = Boolean(card.completedAt);
-  const titleColor = isCompleted
-    ? isDark
-      ? '#9ca3af'
-      : '#6b7280'
-    : colors.text;
+  const coverColorHex = coverHex(card.coverColor);
+  const coverFull = !!coverColorHex && normalizeCoverSize(card.coverSize) === 'FULL';
+  const coverStrip = !!coverColorHex && !coverFull;
+  const titleColor = coverFull
+    ? '#ffffff'
+    : isCompleted
+      ? isDark
+        ? '#9ca3af'
+        : '#6b7280'
+      : colors.text;
 
   return (
     <TouchableOpacity
-      style={styles.card}
+      style={[
+        styles.card,
+        coverFull && coverColorHex ? { backgroundColor: coverColorHex, borderColor: coverColorHex } : null,
+        presence && presence.length > 0 ? { borderColor: presence[0].color, borderWidth: 2 } : null,
+      ]}
       onPress={() => {
         if (suppressOpenRef.current) {
           suppressOpenRef.current = false;
@@ -303,6 +325,18 @@ function BoardCardBase({
       }}
       activeOpacity={0.82}
     >
+      {coverStrip ? (
+        <View style={{ height: 34, backgroundColor: coverColorHex ?? undefined, marginHorizontal: -14, marginTop: -14, marginBottom: 10, borderTopLeftRadius: 15, borderTopRightRadius: 15 }} />
+      ) : null}
+      {presence && presence.length > 0 ? (
+        <View style={[styles.presenceTag, { backgroundColor: presence[0].color }]}>
+          <Text style={styles.presenceTagText} numberOfLines={1}>
+            {firstName(presence[0].name)} {presenceActionLabel(presence[0].state)}
+            {presence.length > 1 ? ` +${presence.length - 1}` : ''}
+          </Text>
+        </View>
+      ) : null}
+
       {labels.length > 0 ? (
         <View style={styles.labels}>
           {labels.slice(0, 5).map((l, i) => (
@@ -349,7 +383,7 @@ function BoardCardBase({
         </Text>
       </View>
 
-      {description ? (
+      {description && !coverFull ? (
         <Text style={styles.cardDescription} numberOfLines={2}>
           {description}
         </Text>
@@ -457,8 +491,13 @@ export default function KanbanBoardScreen() {
   const paramTitle = route.params?.title;
   const { user } = useAuth();
   const { colors, isDark } = useTheme();
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchText, setSearchText] = useState('');
   const [boardAreaH, setBoardAreaH] = useState(0);
-  const columnHeight = Math.max(0, boardAreaH - BOARD_GAP * 2);
+  // A faixa de filtros fica dentro da área do quadro, em cima das colunas: a altura dela sai do espaço
+  // das colunas, senão o fim de cada coluna é cortado.
+  const [filterBarH, setFilterBarH] = useState(0);
+  const columnHeight = Math.max(0, boardAreaH - filterBarH - BOARD_GAP * 2);
   const styles = useMemo(
     () => getStyles(colors, isDark, columnHeight),
     [colors, isDark, columnHeight],
@@ -523,6 +562,45 @@ export default function KanbanBoardScreen() {
 
   const board = boardQuery.data;
 
+  // ── Tempo real: quem está no quadro, em qual cartão, e atualização quando outra pessoa altera algo ──
+  const liveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleChangedByOther = useCallback(() => {
+    if (liveTimerRef.current) clearTimeout(liveTimerRef.current);
+    // Junta várias alterações seguidas numa atualização só.
+    liveTimerRef.current = setTimeout(() => {
+      liveTimerRef.current = null;
+      void queryClient.invalidateQueries({ queryKey: ['kanban-board', departmentKey ?? 'own'] });
+    }, 700);
+  }, [queryClient, departmentKey]);
+  useEffect(
+    () => () => {
+      if (liveTimerRef.current) clearTimeout(liveTimerRef.current);
+    },
+    [],
+  );
+  const collab = useKanbanCollab({ boardId: board?.id, onChangedByOther: handleChangedByOther });
+
+  // Pessoas (sem mim) em cada cartão. Reaproveita os mesmos arrays quando nada mudou.
+  const presenceCacheRef = useRef<Record<string, { sig: string; users: KanbanPresence[] }>>({});
+  const presenceByCard = useMemo(() => {
+    const grouped: Record<string, KanbanPresence[]> = {};
+    for (const u of collab.users) {
+      if (u.userId === collab.selfId || !u.cardId || u.state === 'viewing') continue;
+      (grouped[u.cardId] ??= []).push(u);
+    }
+    const next: Record<string, KanbanPresence[]> = {};
+    const cache: Record<string, { sig: string; users: KanbanPresence[] }> = {};
+    for (const [cardId, users] of Object.entries(grouped)) {
+      const sig = users.map((u) => `${u.userId}:${u.state}`).join('|');
+      const prev = presenceCacheRef.current[cardId];
+      const stable = prev && prev.sig === sig ? prev.users : users;
+      cache[cardId] = { sig, users: stable };
+      next[cardId] = stable;
+    }
+    presenceCacheRef.current = cache;
+    return next;
+  }, [collab.users, collab.selfId]);
+
   /** Filtro por atribuição: 'all', 'mine', 'none' (sem ninguém) ou o id de uma pessoa. */
   const [assigneeFilter, setAssigneeFilter] = useState<string>('all');
   const boardPeople = useMemo(() => {
@@ -565,6 +643,41 @@ export default function KanbanBoardScreen() {
     },
     [navigation, board?.departmentKey, departmentKey],
   );
+
+  const boardsListQuery = useQuery({
+    queryKey: ['kanban-boards'],
+    queryFn: fetchKanbanBoards,
+    enabled: searchOpen,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const searchResults = useMemo(() => {
+    const norm = (v: string | null | undefined) =>
+      (v ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const q = norm(searchText.trim());
+    if (q.length < 2) {
+      return { cards: [] as Array<{ card: KanbanCard; columnTitle: string }>, boards: [] as KanbanBoardSummary[], total: 0 };
+    }
+    const cards: Array<{ card: KanbanCard; columnTitle: string; inTitle: boolean }> = [];
+    for (const col of board?.columns ?? []) {
+      for (const card of col.cards ?? []) {
+        const inTitle = norm(card.title).includes(q);
+        if (inTitle || norm(card.description).includes(q)) {
+          cards.push({ card, columnTitle: col.title, inTitle });
+        }
+      }
+    }
+    cards.sort((a, b) => Number(b.inTitle) - Number(a.inTitle));
+    const boards = (boardsListQuery.data ?? [])
+      .filter((b) => norm(b.department).includes(q) || norm(b.name).includes(q))
+      .slice(0, 4);
+    return { cards: cards.slice(0, 30), boards, total: cards.length };
+  }, [searchText, board?.columns, boardsListQuery.data]);
+
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false);
+    setSearchText('');
+  }, []);
 
   const openAddCard = useCallback((columnId: string) => {
     setNewTitle('');
@@ -618,9 +731,10 @@ export default function KanbanBoardScreen() {
         onToggleComplete={toggleCardComplete}
         onAdd={openAddCard}
         onEdit={setColumnEdit}
+        presenceByCard={presenceByCard}
       />
     ),
-    [styles, colors, isDark, readOnly, openCard, toggleCardComplete, openAddCard],
+    [styles, colors, isDark, readOnly, openCard, toggleCardComplete, openAddCard, presenceByCard],
   );
 
   const addCard = async () => {
@@ -677,7 +791,7 @@ export default function KanbanBoardScreen() {
         onBack={() => navigation.goBack()}
         rightAction={
           <View style={styles.headerBtns}>
-            <TouchableOpacity
+            <HeaderIconButton
               onPress={() => {
                 const options: Array<{ text: string; onPress?: () => void; style?: 'cancel' }> = [
                   { text: 'Cards arquivados', onPress: () => setArchivedOpen(true) },
@@ -692,16 +806,83 @@ export default function KanbanBoardScreen() {
                 options.push({ text: 'Cancelar', style: 'cancel' });
                 Alert.alert(displayTitle || 'Quadro', undefined, options);
               }}
-              hitSlop={6}
               accessibilityLabel="Mais opções"
-              style={styles.headerBtn}
-              activeOpacity={0.7}
             >
               <MoreHorizontal size={22} color={colors.text} strokeWidth={2.1} />
-            </TouchableOpacity>
+            </HeaderIconButton>
           </View>
         }
       />
+
+      <Modal visible={searchOpen} animationType="fade" onRequestClose={closeSearch}>
+        <View style={[styles.safe, { paddingTop: 48 }]}>
+          <View style={styles.searchBar}>
+            <Search size={18} color={colors.textSecondary} />
+            <TextInput
+              value={searchText}
+              onChangeText={setSearchText}
+              placeholder="Buscar cards e quadros"
+              placeholderTextColor={colors.textSecondary}
+              autoFocus
+              returnKeyType="search"
+              style={styles.searchInput}
+            />
+            <TouchableOpacity onPress={closeSearch} hitSlop={10}>
+              <Text style={styles.searchCancel}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 14, paddingBottom: 40 }}>
+            {searchText.trim().length < 2 ? (
+              <Text style={styles.searchHint}>Digite ao menos 2 letras.</Text>
+            ) : searchResults.cards.length === 0 && searchResults.boards.length === 0 ? (
+              <Text style={styles.searchHint}>Nada encontrado.</Text>
+            ) : null}
+            {searchResults.cards.length > 0 ? <Text style={styles.searchSection}>Cartões</Text> : null}
+            {searchResults.cards.map(({ card, columnTitle }) => {
+              const hex = coverHex(card.coverColor);
+              return (
+                <TouchableOpacity
+                  key={card.id}
+                  style={styles.searchRow}
+                  onPress={() => {
+                    closeSearch();
+                    openCard(card);
+                  }}
+                >
+                  <View style={[styles.searchSwatch, { backgroundColor: hex ?? colors.border }]}>
+                    <ListChecks size={14} color={hex ? '#fff' : colors.textSecondary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.searchTitle} numberOfLines={1}>{card.title?.trim() || 'Sem título'}</Text>
+                    <Text style={styles.searchSub} numberOfLines={1}>{displayTitle}: {columnTitle}</Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+            {searchResults.total > searchResults.cards.length ? (
+              <Text style={styles.searchHint}>e mais {searchResults.total - searchResults.cards.length} no quadro</Text>
+            ) : null}
+            {searchResults.boards.length > 0 ? <Text style={styles.searchSection}>Quadros</Text> : null}
+            {searchResults.boards.map((b) => (
+              <TouchableOpacity
+                key={b.id}
+                style={styles.searchRow}
+                onPress={() => {
+                  closeSearch();
+                  navigation.push('KanbanBoard', { departmentKey: b.departmentKey, title: b.department });
+                }}
+              >
+                <View style={[styles.searchSwatch, { backgroundColor: colors.primary }]}>
+                  <Text style={{ color: '#fff', fontWeight: '800', fontSize: 11 }}>
+                    {b.department.trim().slice(0, 1).toUpperCase()}
+                  </Text>
+                </View>
+                <Text style={[styles.searchTitle, { flex: 1 }]} numberOfLines={1}>{b.department}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      </Modal>
 
       {(resolvingDefault || (boardQuery.isLoading && !board)) ? (
         <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} />
@@ -710,9 +891,18 @@ export default function KanbanBoardScreen() {
           style={styles.boardArea}
           onLayout={(e) => setBoardAreaH(e.nativeEvent.layout.height)}
         >
-          <View style={styles.filterBar}>
+          <View style={styles.filterBar} onLayout={(e) => setFilterBarH(e.nativeEvent.layout.height)}>
+            <TouchableOpacity
+              onPress={() => setSearchOpen(true)}
+              activeOpacity={0.75}
+              accessibilityLabel="Buscar"
+              style={styles.searchBtn}
+            >
+              <Search size={16} color={colors.textSecondary} strokeWidth={2.2} />
+            </TouchableOpacity>
             <ScrollView
               horizontal
+              style={{ flex: 1 }}
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.filterBarContent}
               keyboardShouldPersistTaps="handled"
@@ -740,6 +930,7 @@ export default function KanbanBoardScreen() {
                 );
               })}
             </ScrollView>
+            <KanbanPresenceBar users={collab.users} selfId={collab.selfId} />
           </View>
           <FlatList
             horizontal
@@ -884,6 +1075,7 @@ function ColumnBase({
   onToggleComplete,
   onAdd,
   onEdit,
+  presenceByCard,
 }: {
   column: KanbanColumn;
   styles: ReturnType<typeof getStyles>;
@@ -894,8 +1086,10 @@ function ColumnBase({
   onToggleComplete: (c: KanbanCard) => void;
   onAdd: (columnId: string) => void;
   onEdit: (column: KanbanColumn) => void;
+  presenceByCard?: Record<string, KanbanPresence[]>;
 }) {
   const columnBg = getKanbanColumnBg(column.color, isDark);
+  const columnFadeColor = getKanbanColumnFadeColor(column.color, isDark);
   const cards = Array.isArray(column.cards) ? column.cards : [];
   const [showBottomFade, setShowBottomFade] = useState(false);
   const scrollH = useRef(0);
@@ -922,9 +1116,10 @@ function ColumnBase({
         readOnly={readOnly}
         onPress={onOpenCard}
         onToggleComplete={onToggleComplete}
+        presence={presenceByCard?.[item.id]}
       />
     ),
-    [styles, colors, isDark, readOnly, onOpenCard, onToggleComplete],
+    [styles, colors, isDark, readOnly, onOpenCard, onToggleComplete, presenceByCard],
   );
 
   return (
@@ -975,7 +1170,7 @@ function ColumnBase({
           scrollEventThrottle={16}
         />
         {showBottomFade ? (
-          <ColumnBottomFade color={columnBg} fadeId={`kanban-fade-${column.id}`} />
+          <ColumnBottomFade color={columnFadeColor} fadeId={`kanban-fade-${column.id}`} />
         ) : null}
       </View>
 
@@ -1033,7 +1228,7 @@ function getStyles(colors: any, isDark: boolean, columnHeight: number) {
     boardArea: {
       flex: 1,
     },
-    filterBar: { paddingTop: 8 },
+    filterBar: { paddingTop: 8, flexDirection: 'row', alignItems: 'center' },
     filterBarContent: { paddingHorizontal: BOARD_GAP, gap: 8, alignItems: 'center' },
     filterChip: {
       paddingHorizontal: 14,
@@ -1107,6 +1302,15 @@ function getStyles(colors: any, isDark: boolean, columnHeight: number) {
       borderWidth: StyleSheet.hairlineWidth * 2,
       borderColor: isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)',
     },
+    presenceTag: {
+      alignSelf: 'flex-start',
+      maxWidth: '100%',
+      marginBottom: 8,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 999,
+    },
+    presenceTagText: { fontSize: 10, fontWeight: '700', color: '#fff' },
     labels: {
       flexDirection: 'row',
       flexWrap: 'wrap',
@@ -1136,6 +1340,28 @@ function getStyles(colors: any, isDark: boolean, columnHeight: number) {
       justifyContent: 'center',
     },
     headerBtns: { flexDirection: 'row', alignItems: 'center' },
+    searchBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      marginHorizontal: 14,
+      marginBottom: 6,
+      paddingHorizontal: 12,
+      height: 44,
+      borderRadius: 12,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    searchBtn: { width: 34, height: 34, marginLeft: 12, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+    searchInput: { flex: 1, fontSize: 15, color: colors.text, paddingVertical: 0 },
+    searchCancel: { color: colors.primary, fontWeight: '700', fontSize: 13 },
+    searchHint: { color: colors.textSecondary, fontSize: 13, paddingVertical: 10, paddingHorizontal: 4 },
+    searchSection: { color: colors.textSecondary, fontSize: 11, fontWeight: '800', textTransform: 'uppercase', marginTop: 10, marginBottom: 6, paddingHorizontal: 4 },
+    searchRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, paddingHorizontal: 6, borderRadius: 10 },
+    searchSwatch: { width: 30, height: 24, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
+    searchTitle: { color: colors.text, fontSize: 14, fontWeight: '700' },
+    searchSub: { color: colors.textSecondary, fontSize: 12, marginTop: 1 },
     headerBtn: { width: 40, height: 44, alignItems: 'center', justifyContent: 'center' },
 
     titleRow: {

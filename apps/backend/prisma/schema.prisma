@@ -3768,6 +3768,10 @@ model KanbanCard {
   completedAt        DateTime?
   archivedAt         DateTime?
   workHours          Decimal?     @db.Decimal(8, 2)
+  /// Capa colorida do cartão (como no Trello): green, yellow, orange, red, purple, blue, sky, lime, pink ou black.
+  coverColor         String?
+  /// NORMAL = faixa no topo; FULL = cartão inteiro colorido.
+  coverSize          String       @default("NORMAL")
   createdAt          DateTime     @default(now())
   updatedAt          DateTime     @updatedAt
 

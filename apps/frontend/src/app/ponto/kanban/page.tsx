@@ -147,6 +147,7 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { clsx } from 'clsx';
 import toast from 'react-hot-toast';
 import { useKanbanColaboracao } from './useKanbanColaboracao';
+import { coverHex, normalizeCoverSize } from '@/components/kanban/kanbanCover';
 import {
   KanbanPresenceBar,
   presenceActionLabel,
@@ -676,8 +677,8 @@ function KanbanBoardSkeleton() {
           key={colIdx}
           className={clsx(
             'relative flex w-[340px] flex-shrink-0 flex-col rounded-2xl',
-            '[background-color:color-mix(in_srgb,var(--kanban-column-accent)_22%,#FFFFFF)]',
-            'dark:[background-color:color-mix(in_srgb,var(--kanban-column-accent)_28%,rgb(31_41_55))]',
+            '[background-color:color-mix(in_srgb,var(--kanban-column-accent)_16%,transparent)]',
+            'dark:[background-color:color-mix(in_srgb,var(--kanban-column-accent)_22%,transparent)]',
           )}
           style={getKanbanColumnSurfaceStyle(col.color)}
         >
@@ -1022,6 +1023,8 @@ function kanbanCardBoardSnapshot(card: KanbanCard): string {
     card.startDate ?? '',
     card.completedAt ?? '',
     card.labels.map((l) => `${l.color}:${l.text}`).join(','),
+    card.coverColor ?? '',
+    card.coverSize ?? '',
     (card.members ?? []).map((m) => m.userId).join(','),
     card.assignee,
   ].join('|');
@@ -1077,6 +1080,9 @@ function KanbanCardItem({
   const { celebrating, trigger: triggerCelebrate } = useCelebratePulse();
   const isCompleted = Boolean(card.completedAt);
   const showCompleteCheck = true;
+  const coverColorHex = coverHex(card.coverColor);
+  const coverFull = !!coverColorHex && normalizeCoverSize(card.coverSize) === 'FULL';
+  const coverStrip = !!coverColorHex && !coverFull;
   const showArchiveAction =
     isCompleted && !readOnly && Boolean(onArchiveCard);
   const titleIndented =
@@ -1139,13 +1145,13 @@ function KanbanCardItem({
       }}
       role="button"
       tabIndex={0}
-      style={
-        presence && presence.length > 0
-          ? { boxShadow: `0 0 0 2px ${presence[0].color}` }
-          : undefined
-      }
+      style={{
+        ...(presence && presence.length > 0 ? { boxShadow: `0 0 0 2px ${presence[0].color}` } : {}),
+        ...(coverFull && coverColorHex ? { backgroundColor: coverColorHex } : {}),
+      }}
       className={clsx(
-        'group relative rounded-2xl border border-transparent bg-white p-4 dark:bg-gray-800',
+        'group relative rounded-2xl border border-transparent p-4',
+        coverFull && coverColorHex ? 'text-white' : 'bg-white dark:bg-gray-800',
         menuOpen && 'z-30',
         'cursor-pointer select-none shadow-[0_1px_3px_rgba(0,0,0,0.08)]',
         'transition-[border-color,filter] duration-200 ease-out',
@@ -1160,6 +1166,13 @@ function KanbanCardItem({
       )}
     >
       {paperConfettiHost}
+      {coverStrip ? (
+        <div
+          className="-mx-4 -mt-4 mb-3 h-9 rounded-t-2xl"
+          style={{ backgroundColor: coverColorHex ?? undefined }}
+          aria-hidden
+        />
+      ) : null}
       {presence && presence.length > 0 ? (
         <div
           className="pointer-events-none absolute -top-2.5 right-3 z-20 max-w-[85%] truncate rounded-full px-2 py-0.5 text-[10px] font-semibold text-white shadow-sm"
@@ -1291,9 +1304,11 @@ function KanbanCardItem({
           className={clsx(
             'min-w-0 text-[15px] font-semibold leading-snug',
             'transition-colors duration-200 ease-out',
-            isCompleted && showCompleteCheck
-              ? 'text-gray-500 dark:text-gray-400'
-              : 'text-gray-900 dark:text-gray-100',
+            coverFull
+              ? 'text-white'
+              : isCompleted && showCompleteCheck
+                ? 'text-gray-500 dark:text-gray-400'
+                : 'text-gray-900 dark:text-gray-100',
           )}
         >
           {card.title.trim() ? (
@@ -1304,15 +1319,24 @@ function KanbanCardItem({
         </h4>
       </div>
 
-      {card.description?.trim() ? (
+      {card.description?.trim() && !coverFull ? (
         <p className="text-sm text-gray-500 dark:text-gray-400 truncate mb-3">
           {card.description.trim()}
         </p>
       ) : null}
 
-      <CardMetaRow card={card} />
+      <div className={coverFull ? '[&_*]:!text-white/90' : undefined}>
+        <CardMetaRow card={card} />
+      </div>
 
-      <div className="min-h-[2.25rem] border-t border-gray-100 dark:border-gray-700/80 pt-3 flex items-center justify-between gap-2">
+      <div
+        className={clsx(
+          'min-h-[2.25rem] border-t pt-3 flex items-center justify-between gap-2',
+          coverFull
+            ? 'border-white/30 [&_*]:!text-white/90'
+            : 'border-gray-100 dark:border-gray-700/80',
+        )}
+      >
         {card.checklistEnabled && card.totalTasks > 0 ? (
           <>
             <ProgressRing value={card.progress} />
@@ -1605,8 +1629,8 @@ function KanbanColumnComponent({
         className={clsx(
           'group/collapsed relative flex h-auto w-full flex-shrink-0 flex-col items-center self-start',
           'rounded-2xl overflow-hidden',
-          '[background-color:color-mix(in_srgb,var(--kanban-column-accent)_22%,#FFFFFF)]',
-          'dark:[background-color:color-mix(in_srgb,var(--kanban-column-accent)_28%,rgb(31_41_55))]',
+          '[background-color:color-mix(in_srgb,var(--kanban-column-accent)_16%,transparent)]',
+          'dark:[background-color:color-mix(in_srgb,var(--kanban-column-accent)_22%,transparent)]',
           'hover:brightness-[1.03] dark:hover:brightness-110',
           'transition-[filter,background-color,opacity] duration-200 ease-out motion-reduce:transition-none',
           onColumnDragStart && 'cursor-grab active:cursor-grabbing',
@@ -1689,8 +1713,8 @@ function KanbanColumnComponent({
       className={clsx(
         'relative flex w-full flex-shrink-0 flex-col rounded-2xl overflow-hidden',
         isChecklistView && 'h-full max-h-full min-h-0',
-        '[background-color:color-mix(in_srgb,var(--kanban-column-accent)_22%,#FFFFFF)]',
-        'dark:[background-color:color-mix(in_srgb,var(--kanban-column-accent)_28%,rgb(31_41_55))]',
+        '[background-color:color-mix(in_srgb,var(--kanban-column-accent)_16%,transparent)]',
+        'dark:[background-color:color-mix(in_srgb,var(--kanban-column-accent)_22%,transparent)]',
         'transition-[opacity,box-shadow,background-color,filter] duration-200 ease-out motion-reduce:transition-none',
         onColumnDragStart && 'cursor-grab active:cursor-grabbing [&_[data-kanban-card]]:cursor-pointer',
         isColumnDragging && 'kanban-column-dragging',
@@ -3146,6 +3170,8 @@ function KanbanPage() {
   const [searchOpen, setSearchOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchExpanded = searchOpen || search.trim().length > 0;
+  const [searchFocused, setSearchFocused] = useState(false);
+  const [suggestIndex, setSuggestIndex] = useState(0);
   // Só existe a versão nova (checklist); a versão clássica foi removida.
   const cardViewMode: KanbanCardViewMode = 'checklist';
   const [filterPriorities, setFilterPriorities] = useState<string[]>([]);
@@ -4499,6 +4525,50 @@ function KanbanPage() {
     ],
   );
 
+  /** Sugestões ao digitar (como no Trello): cartões do quadro e quadros com o nome parecido. */
+  const searchSuggestions = useMemo(() => {
+    const q = search.trim();
+    if (q.length < 2) return { cards: [] as Array<{ card: KanbanCard; columnId: string; columnTitle: string }>, boards: [] as KanbanBoardSummary[], totalCards: 0 };
+    const cards: Array<{ card: KanbanCard; columnId: string; columnTitle: string; inTitle: boolean }> = [];
+    for (const col of columns) {
+      for (const card of col.cards) {
+        const inTitle = textMatchesSearch(card.title, q);
+        if (inTitle || textMatchesSearch(card.description, q)) {
+          cards.push({ card, columnId: col.id, columnTitle: col.title, inTitle });
+        }
+      }
+    }
+    cards.sort((a, b) => Number(b.inTitle) - Number(a.inTitle));
+    const boards = (boardsList ?? [])
+      .filter((b) => textMatchesSearch(b.department, q) || textMatchesSearch(b.name, q))
+      .slice(0, 4);
+    return { cards: cards.slice(0, 10), boards, totalCards: cards.length };
+  }, [search, columns, boardsList]);
+
+  const suggestItems = useMemo(
+    () => [
+      ...searchSuggestions.cards.map((c) => ({ kind: 'card' as const, ...c })),
+      ...searchSuggestions.boards.map((b) => ({ kind: 'board' as const, board: b })),
+    ],
+    [searchSuggestions],
+  );
+
+  useEffect(() => {
+    setSuggestIndex(0);
+  }, [search]);
+
+  const pickSuggestion = (idx: number) => {
+    const item = suggestItems[idx];
+    if (!item) return;
+    setSearchFocused(false);
+    searchInputRef.current?.blur();
+    if (item.kind === 'card') {
+      openEditCard(item.card, item.columnId);
+    } else {
+      openBoard(item.board.departmentKey);
+    }
+  };
+
   if (!meUser && loadingPerms) {
     return <Loading message="Carregando Tasks..." fullScreen size="lg" />;
   }
@@ -4577,6 +4647,7 @@ function KanbanPage() {
             {/* Direita: busca + filtro + mais opções */}
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               {/* Search — colapsável com animação de largura */}
+              <div className="relative shrink-0">
               <div
                 className={clsx(
                   'relative h-9 shrink-0 overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900',
@@ -4614,10 +4685,27 @@ function KanbanPage() {
                     type="text"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
+                    onFocus={() => setSearchFocused(true)}
                     onBlur={() => {
+                      setSearchFocused(false);
                       if (!search.trim()) setSearchOpen(false);
                     }}
                     onKeyDown={(e) => {
+                      if (e.key === 'ArrowDown' && suggestItems.length > 0) {
+                        e.preventDefault();
+                        setSuggestIndex((i) => (i + 1) % suggestItems.length);
+                        return;
+                      }
+                      if (e.key === 'ArrowUp' && suggestItems.length > 0) {
+                        e.preventDefault();
+                        setSuggestIndex((i) => (i - 1 + suggestItems.length) % suggestItems.length);
+                        return;
+                      }
+                      if (e.key === 'Enter' && searchFocused && suggestItems.length > 0) {
+                        e.preventDefault();
+                        pickSuggestion(suggestIndex);
+                        return;
+                      }
                       if (e.key === 'Escape') {
                         if (search) {
                           setSearch('');
@@ -4646,6 +4734,88 @@ function KanbanPage() {
                     </button>
                   ) : null}
                 </div>
+              </div>
+              {searchExpanded && searchFocused && search.trim().length >= 2 && suggestItems.length > 0 ? (
+                <div
+                  role="listbox"
+                  aria-label="Resultados da busca"
+                  onMouseDown={(e) => e.preventDefault()}
+                  className="absolute right-0 top-full z-50 mt-2 max-h-[70vh] w-[min(92vw,560px)] overflow-y-auto rounded-xl border border-gray-200 bg-white p-1.5 shadow-xl dark:border-gray-700 dark:bg-gray-900"
+                >
+                  {searchSuggestions.cards.length > 0 ? (
+                    <p className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      Cartões
+                    </p>
+                  ) : null}
+                  {searchSuggestions.cards.map((c, i) => {
+                    const hex = coverHex(c.card.coverColor);
+                    return (
+                      <button
+                        key={c.card.id}
+                        type="button"
+                        role="option"
+                        aria-selected={suggestIndex === i}
+                        onMouseEnter={() => setSuggestIndex(i)}
+                        onClick={() => pickSuggestion(i)}
+                        className={clsx(
+                          'flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left transition-colors',
+                          suggestIndex === i ? 'bg-gray-100 dark:bg-gray-800' : 'hover:bg-gray-50 dark:hover:bg-gray-800/60',
+                        )}
+                      >
+                        <span
+                          className="mt-0.5 flex h-5 w-6 shrink-0 items-center justify-center rounded"
+                          style={{ backgroundColor: hex ?? undefined }}
+                          aria-hidden
+                        >
+                          <ListChecks className={clsx('h-3.5 w-3.5', hex ? 'text-white' : 'text-gray-400')} />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-medium text-gray-900 dark:text-gray-100">
+                            {c.card.title || 'Sem título'}
+                          </span>
+                          <span className="block truncate text-xs text-gray-500 dark:text-gray-400">
+                            {board?.department ?? 'Quadro'}: {c.columnTitle}
+                          </span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                  {searchSuggestions.totalCards > searchSuggestions.cards.length ? (
+                    <p className="px-3 py-1.5 text-xs text-gray-500 dark:text-gray-400">
+                      e mais {searchSuggestions.totalCards - searchSuggestions.cards.length} no quadro (veja os filtrados abaixo)
+                    </p>
+                  ) : null}
+                  {searchSuggestions.boards.length > 0 ? (
+                    <p className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      Quadros
+                    </p>
+                  ) : null}
+                  {searchSuggestions.boards.map((b, bi) => {
+                    const i = searchSuggestions.cards.length + bi;
+                    return (
+                      <button
+                        key={b.id}
+                        type="button"
+                        role="option"
+                        aria-selected={suggestIndex === i}
+                        onMouseEnter={() => setSuggestIndex(i)}
+                        onClick={() => pickSuggestion(i)}
+                        className={clsx(
+                          'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors',
+                          suggestIndex === i ? 'bg-gray-100 dark:bg-gray-800' : 'hover:bg-gray-50 dark:hover:bg-gray-800/60',
+                        )}
+                      >
+                        <span className="flex h-5 w-6 shrink-0 items-center justify-center rounded bg-blue-600 text-[10px] font-bold text-white" aria-hidden>
+                          {b.department.trim().slice(0, 1).toUpperCase()}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium text-gray-900 dark:text-gray-100">
+                          {b.department}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
               </div>
               <button
                 type="button"

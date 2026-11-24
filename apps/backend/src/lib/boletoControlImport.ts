@@ -214,6 +214,17 @@ export function parseBoletoControlSpreadsheet(buffer: Buffer): BoletoControlPars
     );
   }
 
+  // Título da coluna A errado (ex.: "g" no lugar de "POLO"): se nenhuma outra coluna usa a posição 0
+  // e o Polo não foi encontrado, a coluna A é o Polo (é a ordem padrão da planilha).
+  if (columnOf.polo === undefined && !Object.values(columnOf).includes(0)) {
+    columnOf.polo = 0;
+    const titulo = String((rows[headerIdx] as unknown[])[0] ?? '').trim();
+    result.warnings.push({
+      row: headerIdx + 1,
+      message: `A coluna A está com o título "${titulo || 'vazio'}" em vez de "POLO": foi lida como Polo.`,
+    });
+  }
+
   const get = (row: unknown[], field: string): unknown => {
     const c = columnOf[field];
     return c === undefined ? '' : row[c];

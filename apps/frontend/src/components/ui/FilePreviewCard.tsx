@@ -18,7 +18,6 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
-import * as XLSX from 'xlsx';
 import { loadPdfjs } from '@/lib/loadPdfjs';
 import toast from 'react-hot-toast';
 import { downloadUploadFile } from '@/lib/downloadUploadFile';
@@ -231,6 +230,7 @@ export function FilePreviewCard({
         const response = await fetch(href);
         if (!response.ok) throw new Error('Falha ao baixar planilha');
         const buffer = await response.arrayBuffer();
+        const XLSX = await import('xlsx');
         const wb = XLSX.read(buffer, { type: 'array' });
         const sheets = wb.SheetNames.map((name) => {
           const ws = wb.Sheets[name];

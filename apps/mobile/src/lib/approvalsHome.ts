@@ -200,8 +200,9 @@ export async function fetchPendingApprovalsForTab(
       .filter((row: MedicaoApprovalRow) => isApprovalPendingStatus('medicao', row.status))
       .map((row: MedicaoApprovalRow) => ({
         id: row.id,
-        title: row.displayNumber != null ? `Medição #${row.displayNumber}` : row.empreiteiro?.name || 'Medição',
-        person: row.empreiteiro?.name || null,
+        // O número e o tipo já aparecem no topo do cartão (#N e «Medições»): o título diz de quem é.
+        title: row.empreiteiro?.name || 'Medição',
+        person: null,
         place: row.contratoNome || row.empreiteiro?.contratoNome || null,
         subtitle:
           row.contratoNome ||
@@ -220,9 +221,10 @@ export async function fetchPendingApprovalsForTab(
       .filter((row: AditivoApprovalRow) => isApprovalPendingStatus('aditivo', row.status))
       .map((row: AditivoApprovalRow) => ({
         id: row.id,
-        title: `Aditivo #${row.number}`,
-        person: row.empreiteiro?.name || null,
-        place: row.serviceName || null,
+        // O número e o tipo já aparecem no topo do cartão (#N e «Aditivos»): o título diz de quem é.
+        title: row.empreiteiro?.name || row.serviceName || 'Aditivo',
+        person: null,
+        place: row.serviceName && row.serviceName !== row.empreiteiro?.name ? row.serviceName : null,
         subtitle: row.serviceName || row.empreiteiro?.name || formatApprovalMoney(row.amount),
         meta: `${formatApprovalMoney(row.amount)} · ${formatApprovalDate(row.createdAt)}`,
         statusLabel: 'Pendente',

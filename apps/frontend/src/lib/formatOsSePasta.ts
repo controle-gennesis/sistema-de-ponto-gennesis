@@ -14,12 +14,25 @@ export function stripOsSePrefix(label: string | null | undefined): string {
   return (label || '').trim().replace(/^(OS|SE)\s+/i, '').trim();
 }
 
+/**
+ * OS provisória digitada como «XX/2026»: mostra o nº da pasta no lugar do XX («74/2026»).
+ * Devolve null quando não é esse caso (código normal ou pasta sem número).
+ */
+export function osCodigoComPastaNoXx(divSe: string | null | undefined, folderNumber: string | null | undefined): string | null {
+  const m = String(divSe ?? '').trim().match(/^XX(?=$|[\s/.\-_])(.*)$/i);
+  const f = String(folderNumber ?? '').trim().match(/^(?:N[ºo°.]?\s*)?(\d+)$/i);
+  if (!m || !f) return null;
+  return `${f[1]}${m[1]}`;
+}
+
 export function formatOsSePasta(
   divSe: string | null | undefined,
   folderNumber: string | null | undefined
 ): string {
   const d = stripOsSePrefix(divSe);
   if (!d) return '';
+  const comNumero = osCodigoComPastaNoXx(d, folderNumber);
+  if (comNumero) return comNumero;
   const pasta = (folderNumber || '').trim();
   if (pasta) return `${d} - ${pasta}`;
   return d;

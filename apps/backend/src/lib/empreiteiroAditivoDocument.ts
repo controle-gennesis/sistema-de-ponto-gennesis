@@ -11,6 +11,7 @@ import {
   buildContractDocData,
   camposEmBranco,
   substituirDestaques,
+  textoVermelhoParaPreto,
   trocarTitulo,
   valorPorExtenso,
   xmlEscape,
@@ -158,7 +159,7 @@ export async function montarTermoAditivoDocx(data: ContractDocData, a: AditivoDo
   ];
   docXml = substituirDestaques(docXml, valores, !data.cpf, valores.length);
 
-  zip.file('word/document.xml', docXml);
+  zip.file('word/document.xml', textoVermelhoParaPreto(docXml));
   return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
 }
 

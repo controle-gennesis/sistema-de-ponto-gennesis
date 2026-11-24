@@ -505,6 +505,92 @@ const inputClass =
   'w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100';
 const labelClass = 'mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300';
 
+/** Descrição do serviço em checklist: no banco continua um texto, um item por linha. */
+function descricaoParaItens(texto: string | null | undefined): string[] {
+  const itens = String(texto ?? '')
+    .split(/\r?\n/)
+    .map((linha) => linha.replace(/^\s*(?:[-•*]|\[[ xX]?\])\s*/, '').trim())
+    .filter(Boolean);
+  return itens.length ? itens : [''];
+}
+
+function itensParaDescricao(itens: string[]): string | null {
+  const limpos = itens.map((i) => i.trim()).filter(Boolean);
+  return limpos.length ? limpos.join('\n') : null;
+}
+
+/** Texto da descrição para mostrar na ficha do serviço: um item por linha, com marcador. */
+function descricaoParaExibir(texto: string | null | undefined): string {
+  const itens = descricaoParaItens(texto).filter(Boolean);
+  return itens.map((i) => `• ${i}`).join('\n');
+}
+
+function ChecklistDescricao({
+  itens,
+  onChange,
+  disabled = false,
+}: {
+  itens: string[];
+  onChange: (proximos: string[]) => void;
+  disabled?: boolean;
+}) {
+  const setItem = (idx: number, valor: string) => onChange(itens.map((it, i) => (i === idx ? valor : it)));
+  const remover = (idx: number) => onChange(itens.filter((_, i) => i !== idx));
+  const adicionar = () => onChange([...itens, '']);
+  return (
+    <div className="space-y-2">
+      {itens.map((item, idx) => (
+        <div key={idx} className="flex items-center gap-2">
+          <span
+            className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-gray-300 text-[10px] font-semibold text-gray-400 dark:border-gray-600"
+            aria-hidden
+          >
+            {idx + 1}
+          </span>
+          <input
+            type="text"
+            value={item}
+            disabled={disabled}
+            onChange={(e) => setItem(idx, e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                adicionar();
+              }
+            }}
+            placeholder={idx === 0 ? 'Primeiro item (obrigatório)' : 'Item do escopo'}
+            aria-required={idx === 0}
+            className={inputClass}
+          />
+          {idx > 0 ? (
+            <button
+              type="button"
+              onClick={() => remover(idx)}
+              disabled={disabled}
+              aria-label={`Remover item ${idx + 1}`}
+              title="Remover item"
+              className="shrink-0 rounded-lg p-2 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          ) : (
+            <span className="w-8 shrink-0" aria-hidden />
+          )}
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={adicionar}
+        disabled={disabled}
+        className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+      >
+        <Plus className="h-4 w-4" />
+        Adicionar item
+      </button>
+    </div>
+  );
+}
+
 /** Reduz a foto (lado maior 800px, JPEG) para o envio não estourar o tempo limite; em caso de falha mantém a original. */
 async function reduzirImagem(dataUrl: string, maxLado = 800): Promise<string> {
   try {
@@ -628,7 +714,7 @@ export default function EmpreiteirosPage() {
   const [uploadingFile, setUploadingFile] = useState(false);
   const [addingContract, setAddingContract] = useState(false);
   const [newServiceName, setNewServiceName] = useState('');
-  const [newServiceDescription, setNewServiceDescription] = useState('');
+  const [newServiceItems, setNewServiceItems] = useState<string[]>(['']);
   const [newServicePlannedValue, setNewServicePlannedValue] = useState('');
   const [newServiceWeight, setNewServiceWeight] = useState('');
   const [newServiceAccumulated, setNewServiceAccumulated] = useState('');
@@ -661,7 +747,7 @@ export default function EmpreiteirosPage() {
   const [addendumParcelAmounts, setAddendumParcelAmounts] = useState<string[]>([]);
   const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
   const [editServiceName, setEditServiceName] = useState('');
-  const [editServiceDescription, setEditServiceDescription] = useState('');
+  const [editServiceItems, setEditServiceItems] = useState<string[]>(['']);
   const [editServicePlannedValue, setEditServicePlannedValue] = useState('');
   const [editServiceWeight, setEditServiceWeight] = useState('');
   const [editServiceAccumulated, setEditServiceAccumulated] = useState('');
@@ -998,7 +1084,7 @@ export default function EmpreiteirosPage() {
     setServiceDetailLinkId(null);
     setAddingAddendumForId(null);
     setNewServiceName('');
-    setNewServiceDescription('');
+    setNewServiceItems(['']);
     setNewServicePlannedValue('');
     setNewServiceWeight('');
     setNewServiceAccumulated('');
@@ -1035,6 +1121,10 @@ export default function EmpreiteirosPage() {
     const name = newServiceName.trim();
     if (!viewingItem?.id || !name) {
       toast.error('Informe o nome do contrato de serviço');
+      return;
+    }
+    if (!(newServiceItems[0] ?? '').trim()) {
+      toast.error('Preencha o primeiro item da descrição');
       return;
     }
     if (!newServiceContractId.trim()) {
@@ -1104,7 +1194,7 @@ export default function EmpreiteirosPage() {
     try {
       const res = await api.post(`/empreiteiros/${viewingItem.id}/contracts`, {
         name,
-        description: newServiceDescription.trim() || null,
+        description: itensParaDescricao(newServiceItems),
         plannedValue,
         weightPercent: parsePercentInput(newServiceWeight),
         accumulatedPercent: parsePercentInput(newServiceAccumulated),
@@ -1130,7 +1220,7 @@ export default function EmpreiteirosPage() {
       }
       setAddingContract(false);
       setNewServiceName('');
-      setNewServiceDescription('');
+      setNewServiceItems(['']);
       setNewServicePlannedValue('');
       setNewServiceWeight('');
       setNewServiceAccumulated('');
@@ -1536,13 +1626,8 @@ export default function EmpreiteirosPage() {
                                 />
                               </div>
                               <div>
-                                <label className={labelClass}>Descrição</label>
-                                <textarea
-                                  value={editServiceDescription}
-                                  onChange={(e) => setEditServiceDescription(e.target.value)}
-                                  rows={2}
-                                  className={inputClass}
-                                />
+                                <label className={labelClass}>Descrição *</label>
+                                <ChecklistDescricao itens={editServiceItems} onChange={setEditServiceItems} />
                               </div>
                               <div>
                                 <label className={labelClass}>Valor planejado (R$)</label>
@@ -1834,7 +1919,7 @@ export default function EmpreiteirosPage() {
     setAddingContract(false);
     setEditingServiceId(link.id);
     setEditServiceName(link.contratoNome || link.name || '');
-    setEditServiceDescription(link.description || '');
+    setEditServiceItems(descricaoParaItens(link.description));
     setEditServicePlannedValue(
       link.plannedValue != null && Number.isFinite(link.plannedValue)
         ? formatCurrencyInputBrFromNumber(link.plannedValue)
@@ -1886,6 +1971,10 @@ export default function EmpreiteirosPage() {
     const name = editServiceName.trim();
     if (!name) {
       toast.error('Informe o nome do contrato de serviço');
+      return;
+    }
+    if (!(editServiceItems[0] ?? '').trim()) {
+      toast.error('Preencha o primeiro item da descrição');
       return;
     }
     if (!editServiceContractId.trim()) {
@@ -1963,7 +2052,7 @@ export default function EmpreiteirosPage() {
         `/empreiteiros/${viewingItem.id}/contracts/${editingServiceId}`,
         {
           name,
-          description: editServiceDescription.trim() || null,
+          description: itensParaDescricao(editServiceItems),
           plannedValue,
           weightPercent: parsePercentInput(editServiceWeight),
           accumulatedPercent: parsePercentInput(editServiceAccumulated),
@@ -4879,7 +4968,7 @@ export default function EmpreiteirosPage() {
                                       { rotulo: 'Valor planejado', valor: formatMoneyBr(link.plannedValue) },
                                       { rotulo: 'Valor atual (com aditivos)', valor: formatMoneyBr(contractValue) },
                                       { rotulo: 'Forma de pagamento', valor: paymentLabelForLink(link) },
-                                      { rotulo: 'Descrição', valor: link.description?.trim() },
+                                      { rotulo: 'Descrição', valor: descricaoParaExibir(link.description) },
                                     ].map((campo) => (
                                       <div key={campo.rotulo} className="min-w-0">
                                         <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
@@ -5287,14 +5376,8 @@ export default function EmpreiteirosPage() {
                         />
                       </div>
                       <div>
-                        <label className={labelClass}>Descrição</label>
-                        <textarea
-                          value={newServiceDescription}
-                          onChange={(e) => setNewServiceDescription(e.target.value)}
-                          rows={3}
-                          placeholder="Descreva o escopo do serviço"
-                          className={inputClass}
-                        />
+                        <label className={labelClass}>Descrição *</label>
+                        <ChecklistDescricao itens={newServiceItems} onChange={setNewServiceItems} />
                       </div>
                       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div>

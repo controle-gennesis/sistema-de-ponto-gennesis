@@ -244,6 +244,8 @@ function formatCard(card: {
   updatedAt?: Date;
   completedAt?: Date | null;
   workHours?: { toNumber?: () => number } | number | null;
+  coverColor?: string | null;
+  coverSize?: string | null;
   assignee?: { id: string; name: string; profilePhotoUrl: string | null } | null;
   members?: Array<{ user: { id: string; name: string; profilePhotoUrl: string | null } }>;
   checklistItems?: Array<{
@@ -290,6 +292,8 @@ function formatCard(card: {
     updatedAt: card.updatedAt?.toISOString() ?? card.createdAt.toISOString(),
     completedAt: card.completedAt?.toISOString() ?? null,
     workHours: card.workHours != null ? Number(card.workHours) : null,
+    coverColor: card.coverColor ?? null,
+    coverSize: card.coverSize === 'FULL' ? 'FULL' : 'NORMAL',
     ...(card.checklistItems
       ? { checklistItems: card.checklistItems.map((item) => formatChecklistItem(item)) }
       : {}),
@@ -768,6 +772,16 @@ ${content.trim().slice(0, 120)}`,
       /* push é best-effort */
     }
   })();
+}
+
+/** Cores de capa aceitas (as mesmas do Trello). */
+export const KANBAN_COVER_COLORS = ['green', 'yellow', 'orange', 'red', 'purple', 'blue', 'sky', 'lime', 'pink', 'black'] as const;
+
+function normalizeCoverColor(value: string | null | undefined): string | null {
+  const v = String(value ?? '').trim().toLowerCase();
+  if (!v) return null;
+  if (!(KANBAN_COVER_COLORS as readonly string[]).includes(v)) throw new Error('Cor de capa inválida');
+  return v;
 }
 
 export class KanbanService {
@@ -1328,6 +1342,8 @@ export class KanbanService {
                 checklistEnabled: true,
                 completedAt: true,
                 workHours: true,
+                coverColor: true,
+                coverSize: true,
                 checklistItems: {
                   orderBy: { position: 'asc' },
                   select: { title: true, isDone: true, dueDate: true },
@@ -1385,6 +1401,8 @@ export class KanbanService {
           checklistEnabled: card.checklistEnabled,
           attachmentsEnabled: false,
           workHours: card.workHours,
+          coverColor: card.coverColor,
+          coverSize: card.coverSize,
           completedAt: card.completedAt,
           position: cardIndex,
         });
@@ -2225,6 +2243,9 @@ export class KanbanService {
       attachmentsEnabled?: boolean;
       position?: number;
       workHours?: number | null;
+      /** Capa do cartão: cor da paleta (ou null para remover) e tamanho. */
+      coverColor?: string | null;
+      coverSize?: string;
       /** ISO ou null — marca/desmarca conclusão estilo Trello. */
       completedAt?: string | null;
       /** ISO ou null — arquiva/desarquiva o card (some do quadro). */
@@ -2339,6 +2360,10 @@ export class KanbanService {
       ...(data.workHours !== undefined
         ? { workHours: data.workHours == null ? null : data.workHours }
         : {}),
+      ...(data.coverColor !== undefined
+        ? { coverColor: normalizeCoverColor(data.coverColor) }
+        : {}),
+      ...(data.coverSize !== undefined ? { coverSize: data.coverSize === 'FULL' ? 'FULL' : 'NORMAL' } : {}),
     };
 
     const logUpdate = () =>
@@ -2672,6 +2697,8 @@ export class KanbanService {
           checklistEnabled: source.checklistEnabled,
           attachmentsEnabled: attachmentsToCopy.length > 0 ? true : source.attachmentsEnabled,
           workHours: source.workHours,
+          coverColor: source.coverColor,
+          coverSize: source.coverSize,
           completedAt: null,
           position: 0,
           ...(source.members.length > 0

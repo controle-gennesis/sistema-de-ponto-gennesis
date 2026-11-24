@@ -4,7 +4,6 @@ import React, { useCallback, useEffect, useState, useMemo, useRef } from 'react'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import jsPDF from 'jspdf';
 import { ArrowLeft, AlertCircle, ClipboardList, Edit2, FileDown, Percent, Plus, X, Search, Filter } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
@@ -969,6 +968,7 @@ export default function AndamentoListPage() {
         maxW: 22,
         maxH: 20,
       });
+      const { default: jsPDF } = await import('jspdf');
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();

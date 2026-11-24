@@ -4,7 +4,6 @@ import React, { useCallback, useEffect, useState, useMemo, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import jsPDF from 'jspdf';
 import {
   ArrowLeft,
   FileText,
@@ -4604,6 +4603,7 @@ export default function ContractDetailPage() {
         maxW: 22,
         maxH: 20,
       });
+      const { default: jsPDF } = await import('jspdf');
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();

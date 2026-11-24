@@ -89,6 +89,10 @@ export function osLabelOf(divSe?: string | null, folder?: string | null): string
   const d = String(divSe ?? '').replace(/^(OS|SE)\s+/i, '').trim();
   if (!d) return '';
   const f = String(folder ?? '').trim();
+  // Provisória «XX/2026»: mostra o nº da pasta no lugar do XX («74/2026»).
+  const xx = d.match(/^XX(?=$|[\s/.\-_])(.*)$/i);
+  const num = f.match(/^(?:N[ºo°.]?\s*)?(\d+)$/i);
+  if (xx && num) return `${num[1]}${xx[1]}`;
   return f ? `${d} - ${f}` : d;
 }
 
