@@ -73,12 +73,13 @@ function statusLabel(row: FdApprovalRow): string {
   return row.status;
 }
 
-function statusTone(row: FdApprovalRow): { fg: string; bg: string } {
-  if (isCancelled(row) || row.status === 'REJECTED') return { fg: '#b91c1c', bg: 'rgba(239,68,68,0.16)' };
-  if (row.status === 'WAITING_MANAGER') return { fg: '#6d28d9', bg: 'rgba(139,92,246,0.16)' };
-  if (matchesStage(row, 'FINISHED')) return { fg: '#15803d', bg: 'rgba(34,197,94,0.16)' };
-  if (matchesStage(row, 'QUOTATION')) return { fg: '#4338ca', bg: 'rgba(99,102,241,0.16)' };
-  return { fg: '#b45309', bg: 'rgba(245,158,11,0.16)' };
+/** Mesmas cores e fundo (cor + 18) dos badges das outras listas. */
+function statusColor(row: FdApprovalRow, colors: any): string {
+  if (isCancelled(row) || row.status === 'REJECTED') return colors.error;
+  if (row.status === 'WAITING_MANAGER') return '#d97706';
+  if (matchesStage(row, 'FINISHED')) return colors.success;
+  if (matchesStage(row, 'QUOTATION')) return '#7c3aed';
+  return '#2563eb';
 }
 
 export default function FichasDemandaScreen() {
@@ -227,7 +228,7 @@ export default function FichasDemandaScreen() {
           )
         }
         renderItem={({ item }) => {
-          const tone = statusTone(item);
+          const tone = statusColor(item, colors);
           const contrato = item.contratoNome?.trim() || item.contrato?.name?.trim() || '';
           const solicitante = item.solicitanteNome?.trim() || item.solicitante?.name?.trim() || '';
           return (
@@ -242,8 +243,8 @@ export default function FichasDemandaScreen() {
                 <Text style={styles.code} numberOfLines={1}>
                   {item.codFichaDemanda?.trim() || '—'}
                 </Text>
-                <View style={[styles.badge, { backgroundColor: tone.bg }]}>
-                  <Text style={[styles.badgeText, { color: tone.fg }]}>{statusLabel(item)}</Text>
+                <View style={[styles.badge, { backgroundColor: `${tone}18` }]}>
+                  <Text style={[styles.badgeText, { color: tone }]}>{statusLabel(item)}</Text>
                 </View>
               </View>
 
@@ -344,8 +345,8 @@ const getStyles = (colors: any, isDark: boolean) =>
     },
     cardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
     code: { flex: 1, fontSize: 14, fontWeight: '700', color: colors.textSecondary },
-    badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
-    badgeText: { fontSize: 12, fontWeight: '700' },
+    badge: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 },
+    badgeText: { fontSize: 11, fontWeight: '700' },
     cardTitle: { marginTop: 10, fontSize: 17, fontWeight: '700', color: colors.text, letterSpacing: -0.3, lineHeight: 22 },
     cardLine: { marginTop: 3, fontSize: 14, fontWeight: '500', color: colors.textSecondary },
     metaRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 14 },
