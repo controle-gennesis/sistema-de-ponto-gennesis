@@ -157,6 +157,7 @@ export type TrelloExportBoard = {
     idLabels: string[];
     idMembers: string[];
     attachments: Array<{ id: string; name: string; url: string }>;
+    cover?: { color: string | null; size: 'normal' | 'full' };
   }>;
   labels: Array<{ id: string; name: string; color: string; idBoard: string }>;
   checklists: Array<{
@@ -201,6 +202,8 @@ type BoardRow = {
       endDate: Date | null;
       completedAt: Date | null;
       labels: unknown;
+      coverColor: string | null;
+      coverSize: string;
       assigneeUserId: string | null;
       assignee: { id: string; name: string } | null;
       members: Array<{ user: { id: string; name: string } }>;
@@ -249,6 +252,8 @@ export async function loadBoardForTrelloTransfer(boardId: string): Promise<Board
               endDate: true,
               completedAt: true,
               labels: true,
+              coverColor: true,
+              coverSize: true,
               assigneeUserId: true,
               assignee: { select: { id: true, name: true } },
               members: {
@@ -379,6 +384,7 @@ export function boardToTrelloExport(board: BoardRow): TrelloExportBoard {
           name: a.fileName,
           url: a.fileUrl,
         })),
+        cover: { color: card.coverColor ?? null, size: card.coverSize === 'FULL' ? 'full' : 'normal' },
       });
 
       if (card.checklistItems.length) {
@@ -450,7 +456,20 @@ type ParsedCard = {
     createdAt: string;
   }>;
   attachments: Array<{ url: string; name: string }>;
+  coverColor: string | null;
+  coverSize: 'NORMAL' | 'FULL';
 };
+
+const COVER_COLORS = new Set(['green', 'yellow', 'orange', 'red', 'purple', 'blue', 'sky', 'lime', 'pink', 'black']);
+
+function parseCover(card: Record<string, unknown>): { coverColor: string | null; coverSize: 'NORMAL' | 'FULL' } {
+  const cover = card.cover as { color?: unknown; size?: unknown } | null | undefined;
+  const color = typeof cover?.color === 'string' ? cover.color.toLowerCase() : '';
+  return {
+    coverColor: COVER_COLORS.has(color) ? color : null,
+    coverSize: cover?.size === 'full' ? 'FULL' : 'NORMAL',
+  };
+}
 
 function isTrelloLikeExport(data: unknown): data is Record<string, unknown> {
   return (
@@ -570,6 +589,7 @@ export function parseTrelloExport(data: unknown): {
       checklistItems,
       comments,
       attachments,
+      ...parseCover(card),
     });
   }
 
@@ -945,6 +965,8 @@ export async function importTrelloIntoBoard(
               completedAt: card.completed ? now : null,
               assigneeUserId: firstUserId,
               assigneeName: firstName,
+              coverColor: card.coverColor,
+              coverSize: card.coverSize,
             },
           });
           listCards += 1;

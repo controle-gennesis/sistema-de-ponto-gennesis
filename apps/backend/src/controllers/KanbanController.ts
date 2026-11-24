@@ -552,6 +552,8 @@ export class KanbanController {
         attachmentsEnabled,
         position,
         workHours,
+        coverColor,
+        coverSize,
         completedAt,
         archivedAt,
       } = req.body;
@@ -573,6 +575,8 @@ export class KanbanController {
         attachmentsEnabled:
           attachmentsEnabled !== undefined ? Boolean(attachmentsEnabled) : undefined,
         position: position != null ? Number(position) : undefined,
+        coverColor: coverColor === undefined ? undefined : coverColor === null || coverColor === '' ? null : String(coverColor),
+        coverSize: coverSize === undefined ? undefined : String(coverSize),
         workHours:
           workHours !== undefined
             ? workHours == null || workHours === ''

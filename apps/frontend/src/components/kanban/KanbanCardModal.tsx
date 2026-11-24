@@ -22,6 +22,7 @@ import {
   ChevronLeft,
   Sparkles,
   Check,
+  Palette,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import toast from 'react-hot-toast';
@@ -78,6 +79,8 @@ import { KanbanPriorityPicker } from './KanbanPriorityPicker';
 import { KanbanCardActionButton } from './KanbanCardActionButton';
 import { KanbanCardDatesPanel } from './KanbanCardDatesPopover';
 import { KanbanCardLabelsPanel, KanbanLabelChips } from './KanbanCardLabelsPopover';
+import { KanbanCardCoverPanel } from './KanbanCardCoverPanel';
+import { normalizeCoverSize, type KanbanCoverSize } from './kanbanCover';
 import { getKanbanLabelNameForColor, type KanbanLabelPreset } from './kanbanLabels';
 import {
   LicitacaoCommentEditor,
@@ -96,7 +99,7 @@ import { formatKanbanDateRange } from './kanbanDateTime';
 import { kanbanAvatarColorForKey } from './kanbanAvatar';
 import { KanbanUserAvatar } from './KanbanUserAvatar';
 
-type OpenMenu = 'labels' | 'dates' | null;
+type OpenMenu = 'labels' | 'dates' | 'cover' | null;
 
 interface DraftChecklistTask {
   id: string;
@@ -449,6 +452,8 @@ export function KanbanCardModal({
   const [priority, setPriority] = useState<Priority>('medium');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [coverColor, setCoverColor] = useState<string | null>(null);
+  const [coverSize, setCoverSize] = useState<KanbanCoverSize>('NORMAL');
   const [members, setMembers] = useState<KanbanCardMember[]>([]);
   const [columnId, setColumnId] = useState(initialColumnId);
   const [showMemberPicker, setShowMemberPicker] = useState(false);
@@ -565,6 +570,8 @@ export function KanbanCardModal({
     setPriority(initialCard.priority);
     setStartDate(initialCard.startDate ?? '');
     setEndDate(initialCard.endDate ?? '');
+    setCoverColor(initialCard.coverColor ?? null);
+    setCoverSize(normalizeCoverSize(initialCard.coverSize));
     setMembers(Array.isArray(initialCard.members) ? initialCard.members : []);
     setLabels(Array.isArray(initialCard.labels) ? initialCard.labels : []);
     labelsLiveRef.current = Array.isArray(initialCard.labels) ? initialCard.labels : [];
@@ -614,6 +621,14 @@ export function KanbanCardModal({
     });
     setEndDate((prev) => {
       const next = card.endDate ?? '';
+      return prev === next ? prev : next;
+    });
+    setCoverColor((prev) => {
+      const next = card.coverColor ?? null;
+      return prev === next ? prev : next;
+    });
+    setCoverSize((prev) => {
+      const next = normalizeCoverSize(card.coverSize);
       return prev === next ? prev : next;
     });
     if (memberMutationInFlight.current === 0) {
@@ -850,6 +865,8 @@ export function KanbanCardModal({
         labels,
         startDate: startDate || null,
         endDate: endDate || null,
+        coverColor,
+        coverSize,
         checklistEnabled,
         members,
       });
@@ -863,6 +880,8 @@ export function KanbanCardModal({
         labels,
         startDate: startDate || null,
         endDate: endDate || null,
+        coverColor,
+        coverSize,
         checklistEnabled,
         members,
       };
@@ -879,6 +898,8 @@ export function KanbanCardModal({
     labels: KanbanCardLabel[];
     columnId: string;
     checklistEnabled: boolean;
+    coverColor: string | null;
+    coverSize: KanbanCoverSize;
   }>;
 
   function applyMetaPartial(base: KanbanCard, partial: MetaPartial): KanbanCard {
@@ -890,6 +911,8 @@ export function KanbanCardModal({
       ...(partial.startDate !== undefined ? { startDate: partial.startDate } : {}),
       ...(partial.endDate !== undefined ? { endDate: partial.endDate } : {}),
       ...(partial.labels !== undefined ? { labels: partial.labels } : {}),
+      ...(partial.coverColor !== undefined ? { coverColor: partial.coverColor } : {}),
+      ...(partial.coverSize !== undefined ? { coverSize: partial.coverSize } : {}),
       ...(partial.checklistEnabled !== undefined
         ? { checklistEnabled: partial.checklistEnabled }
         : {}),
@@ -905,6 +928,8 @@ export function KanbanCardModal({
     if (partial.endDate !== undefined) payload.endDate = partial.endDate;
     if (partial.labels !== undefined) payload.labels = partial.labels;
     if (partial.columnId !== undefined) payload.columnId = partial.columnId;
+    if (partial.coverColor !== undefined) payload.coverColor = partial.coverColor;
+    if (partial.coverSize !== undefined) payload.coverSize = partial.coverSize;
     if (partial.checklistEnabled !== undefined) {
       payload.checklistEnabled = partial.checklistEnabled;
     }
@@ -1852,6 +1877,29 @@ export function KanbanCardModal({
         </Modal>
       )}
 
+      {openMenu === 'cover' && (
+        <Modal
+          isOpen
+          elevated
+          confirmBeforeClose={false}
+          onClose={() => setOpenMenu(null)}
+          size="sm"
+          title="Capa"
+          closeOnOverlayClick={!saving}
+        >
+          <KanbanCardCoverPanel
+            color={coverColor}
+            size={coverSize}
+            onClose={() => setOpenMenu(null)}
+            onChange={(next) => {
+              setCoverColor(next.color);
+              setCoverSize(next.size);
+              if (isDetail) saveMeta({ coverColor: next.color, coverSize: next.size });
+            }}
+          />
+        </Modal>
+      )}
+
       {openMenu === 'dates' && (
         <Modal
           isOpen
@@ -2042,6 +2090,15 @@ export function KanbanCardModal({
                   title={hasLabels ? 'Remover todas as etiquetas' : 'Adicionar etiquetas'}
                 >
                   Etiquetas
+                </KanbanCardActionButton>
+                <KanbanCardActionButton
+                  icon={<Palette className="w-4 h-4" />}
+                  active={!!coverColor}
+                  onClick={() => setOpenMenu((m) => (m === 'cover' ? null : 'cover'))}
+                  className="shrink-0"
+                  title="Capa colorida do cartão"
+                >
+                  Capa
                 </KanbanCardActionButton>
                 <KanbanCardActionButton
                   icon={<Clock className="w-4 h-4" />}

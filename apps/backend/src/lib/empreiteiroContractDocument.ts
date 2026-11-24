@@ -158,6 +158,8 @@ export type ContractDocData = {
   contratoPrincipal: string;
   localExecucao: string;
   descricao: string;
+  /** Itens da descrição (checklist). Com 1 ou mais itens, o quadro do contrato ganha uma linha por item. */
+  descricaoItens?: string[];
   valorNumero: string;
   valorExtenso: string;
   peso: string;
@@ -190,6 +192,61 @@ export function camposEmBranco(data: ContractDocData): string[] {
     ['vigenciaFim', 'data de fim'],
   ];
   return rotulos.filter(([k]) => !data[k] || data[k].includes('____')).map(([, r]) => r);
+}
+
+/**
+ * Itens da descrição do serviço: um por linha (tira marcadores como "-", "•" ou "[ ]").
+ * Sem descrição, usa o nome do serviço como único item.
+ */
+export function itensDaDescricao(descricao: string | null | undefined, nomeServico: string): string[] {
+  const itens = String(descricao ?? '')
+    .split(/\r?\n/)
+    .map((linha) => linha.replace(/^\s*(?:[-•*]|\[[ xX]?\])\s*/, '').trim())
+    .filter(Boolean);
+  if (itens.length) return itens;
+  const nome = String(nomeServico ?? '').trim();
+  return nome ? [nome] : [];
+}
+
+/**
+ * Quadro do contrato: uma linha por item da descrição (Item, Descrição). Valor, Peso e Acumulado
+ * ficam numa célula única mesclada na vertical, como no modelo do contrato.
+ * Roda depois de os campos em amarelo terem sido preenchidos.
+ */
+export function expandirQuadroDeItens(xml: string, itens: string[] | undefined): string {
+  if (!itens || itens.length === 0) return xml;
+  const tbl = xml.match(/<w:tbl>[\s\S]*?<\/w:tbl>/);
+  if (!tbl || !/Peso/.test(tbl[0].replace(/<[^>]+>/g, ''))) return xml;
+  const linhas = tbl[0].match(/<w:tr[ >][\s\S]*?<\/w:tr>/g);
+  if (!linhas || linhas.length < 2) return xml;
+  const modelo = linhas[1];
+  const celulas = modelo.match(/<w:tc>[\s\S]*?<\/w:tc>/g);
+  if (!celulas || celulas.length !== 5) return xml;
+
+  const trocarTexto = (cel: string, texto: string) => {
+    let usado = false;
+    return cel.replace(/<w:t(?: [^>]*)?>[^<]*<\/w:t>/g, () => {
+      if (usado) return '';
+      usado = true;
+      return `<w:t xml:space="preserve">${xmlEscape(texto)}</w:t>`;
+    });
+  };
+  const comMescla = (cel: string, primeira: boolean) => {
+    const marca = primeira ? '<w:vMerge w:val="restart"/>' : '<w:vMerge/>';
+    const comTcPr = cel.replace(/(<w:tcW [^>]*\/>)/, `$1${marca}`);
+    if (primeira) return comTcPr;
+    // células seguintes da mescla ficam vazias (parágrafo sem texto)
+    return comTcPr.replace(/<w:p(?: [^>]*)?>[\s\S]*<\/w:p>/, '<w:p/>');
+  };
+
+  const novas = itens.map((texto, i) => {
+    const c0 = trocarTexto(celulas[0], String(i + 1));
+    const c1 = trocarTexto(celulas[1], texto);
+    const mescladas = [celulas[2], celulas[3], celulas[4]].map((c) => (itens.length > 1 ? comMescla(c, i === 0) : c));
+    return `<w:tr><w:trPr><w:cantSplit/></w:trPr>${c0}${c1}${mescladas.join('')}</w:tr>`;
+  });
+  const novaTabela = tbl[0].replace(modelo, novas.join(''));
+  return xml.replace(tbl[0], novaTabela);
 }
 
 export type ContractDocOverride = {
@@ -232,6 +289,7 @@ export async function buildContractDocData(
     localExecucao: link.location?.trim() || BLANK,
     descricao:
       override?.descricao ?? [link.name, link.description].filter((x) => x && x.trim()).join(' — '),
+    descricaoItens: override?.descricao ? undefined : itensDaDescricao(link.description, link.name),
     valorNumero: brl(valor),
     valorExtenso: valorPorExtenso(valor),
     peso: brl(link.weightPercent != null ? Number(link.weightPercent) : 100) + '%',
@@ -286,6 +344,20 @@ function valoresNaOrdemDoModelo(d: ContractDocData): string[] {
     d.razaoSocial, // Assinatura
     `CNPJ n. ${d.cnpj}`,
   ];
+}
+
+/**
+ * Todo texto em vermelho do modelo (cláusulas de destaque) sai em preto, igual ao resto do documento.
+ * Vale para qualquer tom de vermelho (FF0000, C00000...), sem mexer nas outras cores.
+ */
+export function textoVermelhoParaPreto(xml: string): string {
+  return xml.replace(/<w:color w:val="([0-9A-Fa-f]{6})"([^>]*)\/>/g, (inteiro, hex: string) => {
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+    const ehVermelho = r >= 0xa0 && g <= 0x50 && b <= 0x50;
+    return ehVermelho ? '<w:color w:val="000000"/>' : inteiro;
+  });
 }
 
 export const RUN_RE = /<w:r(?: [^>]*)?>(?:(?!<\/w:r>)[\s\S])*<\/w:r>/g;
@@ -356,6 +428,8 @@ export async function preencherModeloDocx(
   if (opcoes?.titulo) xml = trocarTitulo(xml, opcoes.titulo);
 
   xml = substituirDestaques(xml, valoresNaOrdemDoModelo(data), !data.cpf, TOTAL_HIGHLIGHTS);
+  xml = expandirQuadroDeItens(xml, data.descricaoItens);
+  xml = textoVermelhoParaPreto(xml);
 
   zip.file('word/document.xml', xml);
   return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
