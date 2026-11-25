@@ -9,7 +9,7 @@ import { isAdmTstDpRequestType } from './dpRequestAdmTst';
 import { dpRequestGoesToAccounting } from './dpContabilidadeFromInterna';
 import { isAccountingDirectRequestType } from './dpRequestDetails';
 import { DP_CONTABILIDADE_MODULE_KEY } from './dpContabilidadeAccess';
-import { sendPushToUsers } from '../services/PushNotificationService';
+import { dpPushBody, sendPushToUsers } from '../services/PushNotificationService';
 import { savePersistentUpload, deletePersistentUpload } from './persistentUpload';
 import { fixMulterOriginalName } from './fixUploadFileName';
 
@@ -110,17 +110,29 @@ function notifyParticipants(
  * de gerenciar — a de ADM/TST para pedidos administrativos, a do DP para os demais. Nunca lança.
  */
 export function notifyManagersNewDpRequest(
-  row: { id: string; requestType: string; displayNumber?: number | null; title?: string | null },
+  row: {
+    id: string;
+    requestType: string;
+    employeeId?: string | null;
+    displayNumber?: number | null;
+    title?: string | null;
+  },
   actorUserId?: string | null
 ) {
   void (async () => {
     const key = isAdmRow(row) ? ADM_MANAGE_KEY : DP_MANAGE_KEY;
     const recipients = (await userIdsWithModule(key)).filter((id) => id !== actorUserId);
     if (recipients.length === 0) return;
-    const num = row.displayNumber != null ? ` #${row.displayNumber}` : '';
+    const requester = row.employeeId
+      ? await prisma.employee.findUnique({
+          where: { id: row.employeeId },
+          select: { user: { select: { name: true } } },
+        })
+      : null;
+    const requesterName = requester?.user?.name?.trim();
     await sendPushToUsers(recipients, {
       title: 'Nova solicitação na fila',
-      body: `${row.title?.trim() || 'Solicitação'}${num}`,
+      body: dpPushBody(row.title, row.displayNumber, requesterName ? [requesterName] : []),
       data: { type: 'dp-request-new', kind: 'dp', entityId: row.id },
     });
   })().catch((err) => console.warn('[push] falha ao avisar gerentes de DP:', err instanceof Error ? err.message : err));
@@ -209,8 +221,8 @@ export async function announceAccountingDone(dpRequestId: string, actorUserId: s
   notifyParticipants(
     row,
     actorUserId,
-    'Contabilidade concluiu',
-    `Solicitação #${row.displayNumber}\nO DP pode encerrar`
+    'Pronta para encerrar',
+    dpPushBody(row.title, row.displayNumber, ['A Contabilidade concluiu o atendimento'])
   );
 }
 
@@ -449,12 +461,6 @@ export async function postDpRequestAttachment(req: AuthRequest, res: Response, n
       }),
     ]);
     await markRead(row.id, req.user.id);
-    notifyParticipants(
-      row,
-      req.user.id,
-      'Novo documento',
-      `Solicitação #${row.displayNumber}\n${authorName} anexou ${originalName}`.slice(0, 160)
-    );
     res.json({ success: true, data: { items: await listAttachments(row.id) } });
   } catch (e) {
     next(e);

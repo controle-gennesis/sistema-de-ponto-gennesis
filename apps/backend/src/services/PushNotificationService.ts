@@ -271,6 +271,21 @@ function statusFromArgs(args: unknown): string | null {
   return null;
 }
 
+/**
+ * Corpo do aviso de solicitação interna: primeira linha com o tipo e o número, demais linhas com
+ * detalhes extras (ex.: solicitante). «Solicitação ADM/TST · Outros» + 222 vira «Outros #222».
+ */
+export function dpPushBody(title: unknown, displayNumber: unknown, extras: string[] = []): string {
+  const parts = String(title ?? '')
+    .split(/\s+[·—–]\s+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  // Com «categoria · tipo», o tipo é o que identifica a solicitação; sem separador, vale o título todo.
+  const tipo = (parts.length > 1 ? parts.slice(1).join(' · ') : parts[0]) || 'Solicitação';
+  const numero = displayNumber != null && String(displayNumber).trim() ? ` #${String(displayNumber).trim()}` : '';
+  return [`${tipo}${numero}`, ...extras].filter(Boolean).join('\n');
+}
+
 function ref(code: unknown, prefix = '#'): string {
   const raw = code == null ? '' : String(code).trim();
   return raw ? ` ${raw.startsWith('#') ? raw : `${prefix}${raw}`}` : '';
@@ -329,7 +344,7 @@ export function maybeNotifyStatusChange(model: string, args: unknown, result: un
           });
           await sendPushToUsers([employee?.userId], {
             title: DP_TITLE[status] ?? `Solicitação ${(DP[status] ?? status).toLowerCase()}`,
-            body: `Solicitação${ref(row.displayNumber)}`,
+            body: dpPushBody(row.title, row.displayNumber),
             data: { kind: 'dp', entityId, status },
           });
           break;
