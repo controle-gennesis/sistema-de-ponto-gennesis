@@ -17,7 +17,7 @@ router.get('/dashboard', (req, res, next) => controller.dashboard(req, res, next
 router.get('/managers', requireAdministrator, (req, res, next) => controller.listManagers(req, res, next));
 router.put('/managers', requireAdministrator, (req, res, next) => controller.upsertManager(req, res, next));
 router.delete('/managers/:id', requireAdministrator, (req, res, next) => controller.removeManager(req, res, next));
-router.get('/export', requireAdministrator, (req, res, next) => controller.exportSpreadsheet(req, res, next));
+router.get('/export', (req, res, next) => controller.exportSpreadsheet(req, res, next));
 router.get('/', (req, res, next) => controller.list(req, res, next));
 router.post('/', (req, res, next) => controller.create(req, res, next));
 router.post(

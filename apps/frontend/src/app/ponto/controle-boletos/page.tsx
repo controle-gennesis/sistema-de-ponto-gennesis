@@ -641,7 +641,6 @@ function ControleBoletosPage() {
                     <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
                   ) : null}
                 </button>
-                {isAdministrator ? (
                 <div ref={actionsRef} className="relative shrink-0">
                   <button
                     type="button"
@@ -672,6 +671,7 @@ function ControleBoletosPage() {
                         <Download className="h-4 w-4 shrink-0 text-gray-500" />
                         {exporting ? 'Exportando…' : 'Exportar planilha'}
                       </button>
+                      {isAdministrator ? (
                       <button
                         type="button"
                         role="menuitem"
@@ -684,6 +684,8 @@ function ControleBoletosPage() {
                         <Upload className="h-4 w-4 shrink-0 text-gray-500" />
                         Importar planilha
                       </button>
+                      ) : null}
+                      {isAdministrator ? (
                       <button
                         type="button"
                         role="menuitem"
@@ -696,10 +698,10 @@ function ControleBoletosPage() {
                         <UserCog className="h-4 w-4 shrink-0 text-gray-500" />
                         Gestores por centro de custo
                       </button>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
-                ) : null}
                 <button
                   type="button"
                   onClick={openNew}
