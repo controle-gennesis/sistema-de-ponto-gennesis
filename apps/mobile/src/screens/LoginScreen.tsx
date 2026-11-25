@@ -28,7 +28,8 @@ import { useAuth, LAST_FIRST_NAME_KEY } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { normalizeLoginIdentifierInput } from '../lib/cpf';
-import { SPLASH_BG, SPLASH_LOGO_SIZE } from '../components/AuthBrandSplash';
+import { requestBiometricOffer } from '../components/AuthPrompts';
+import { SPLASH_BG, SPLASH_LOGO_SIZE, SplashColorCover, useSplashIntro } from '../components/AuthBrandSplash';
 import AuthGradientBackground from '../components/AuthGradientBackground';
 import ForgotPasswordModal from '../components/ForgotPasswordModal';
 
@@ -83,6 +84,7 @@ export default function LoginScreen({ fromBootSplash = true, active = true }: Pr
     };
   }, []);
   const logoPulse = useRef(new Animated.Value(1)).current;
+  const { cover: splashCover, logoOpacity: logoIntroOpacity, logoIntro } = useSplashIntro();
   const hidNativeSplash = useRef(false);
   const hideNativeSplash = () => {
     if (hidNativeSplash.current) return;
@@ -287,21 +289,8 @@ export default function LoginScreen({ fromBootSplash = true, active = true }: Pr
 
   const offerBiometrics = (id: string, pass: string) => {
     if (!biometric.available || biometric.enabled) return;
-    Alert.alert(
-      `Entrar com ${biometric.label}?`,
-      'No próximo acesso você entra com biometria facial ou digital, sem digitar a senha.',
-      [
-        { text: 'Agora não', style: 'cancel' },
-        {
-          text: 'Ativar',
-          onPress: () => {
-            void enableBiometrics(id, pass).catch((err) => {
-              Alert.alert('Biometria', err instanceof Error ? err.message : 'Não foi possível ativar.');
-            });
-          },
-        },
-      ]
-    );
+    // O convite é uma janela do app (na raiz): o login some assim que a sessão abre.
+    requestBiometricOffer(id, pass);
   };
 
   const handleBiometricLogin = async () => {
@@ -381,6 +370,7 @@ export default function LoginScreen({ fromBootSplash = true, active = true }: Pr
       >
         <AuthGradientBackground />
       </Animated.View>
+      <SplashColorCover opacity={splashCover} />
 
       <Animated.View
         pointerEvents="none"
@@ -392,7 +382,7 @@ export default function LoginScreen({ fromBootSplash = true, active = true }: Pr
           },
         ]}
       >
-        <Animated.View style={{ transform: [{ scale: logoPulse }] }}>
+        <Animated.View style={{ opacity: logoIntroOpacity, transform: [{ scale: Animated.multiply(logoPulse, logoIntro) }] }}>
           <Image
             source={require('../../assets/logo-auth.png')}
             style={styles.logo}

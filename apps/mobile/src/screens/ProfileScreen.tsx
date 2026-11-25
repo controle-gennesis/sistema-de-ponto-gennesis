@@ -34,6 +34,7 @@ import {
 } from 'lucide-react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
+import { requestLogoutConfirm } from '../components/AuthPrompts';
 import { useTheme } from '../context/ThemeContext';
 import AppHeader from '../components/AppHeader';
 import SheetModal from '../components/SheetModal';
@@ -260,12 +261,7 @@ export default function ProfileScreen() {
     }
   };
 
-  const confirmLogout = () => {
-    Alert.alert('Sair', 'Tem certeza que deseja sair?', [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: 'Sair', style: 'destructive', onPress: () => void logout() },
-    ]);
-  };
+  const confirmLogout = () => requestLogoutConfirm();
 
   const appVersion = Constants.expoConfig?.version || '';
 

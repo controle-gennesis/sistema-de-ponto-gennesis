@@ -11,7 +11,6 @@ import {
   Platform,
 } from 'react-native';
 import { SquarePen } from 'lucide-react-native';
-import { GlassBlur } from '../components/GlassBg';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQueryClient } from '@tanstack/react-query';
@@ -143,7 +142,6 @@ export default function HomeScreen() {
             hitSlop={8}
             style={styles.editBtn}
           >
-            <GlassBlur white radius={23} />
             <SquarePen size={20} color={colors.text} strokeWidth={2} />
           </TouchableOpacity>
         </View>

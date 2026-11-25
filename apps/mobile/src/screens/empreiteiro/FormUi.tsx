@@ -1,14 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
   FlatList,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
   useWindowDimensions,
@@ -16,9 +11,10 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronDown, Search, X } from 'lucide-react-native';
 import PickerSheetFrame from '../../components/PickerSheetFrame';
+import SheetModal, { SheetPrimaryButton } from '../../components/SheetModal';
 import { useTheme } from '../../context/ThemeContext';
 import FormFieldLabel from '../../components/FormFieldLabel';
-import { AppToastHost, formFooterBottomPad } from '../../components/AppToast';
+import { AppToastHost } from '../../components/AppToast';
 
 /** Estilos dos formulários, iguais aos das telas de Abastecimento/Solicitações. */
 export function useFormStyles() {
@@ -281,7 +277,10 @@ export function OptionSheet({
   );
 }
 
-/** Esqueleto de formulário em tela cheia: cabeçalho com título/subtítulo, conteúdo rolável e botão fixo no rodapé. */
+/**
+ * Formulário no padrão do app (folha colada no fim da tela, cantos de 28, ícone de fechar redondo, como
+ * a «Recuperar senha» e as solicitações): conteúdo rolável e botão vermelho fixo no rodapé.
+ */
 export function FormModal({
   visible,
   title,
@@ -305,64 +304,33 @@ export function FormModal({
   overlay?: React.ReactNode;
   children: React.ReactNode;
 }) {
-  const { colors, isDark } = useTheme();
-  const styles = useFormStyles();
   const insets = useSafeAreaInsets();
-  const { width, height } = useWindowDimensions();
-  const bloqueado = submitting || submitDisabled;
   return (
-    <Modal visible={visible} animationType="slide" statusBarTranslucent onRequestClose={onClose}>
-      <View
-        style={{
-          flex: 1,
-          backgroundColor: colors.background,
-          paddingTop: insets.top,
-          width,
-          height,
-          position: 'relative',
-        }}
+    <SheetModal
+      visible={visible}
+      onClose={onClose}
+      title={title}
+      subtitle={subtitle}
+      size="tall"
+      scroll={false}
+      overlay={
+        <>
+          {overlay}
+          <AppToastHost topOffset={Math.max(insets.top, 12) + 8} />
+        </>
+      }
+    >
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingTop: 4, paddingBottom: 20 }}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <View style={styles.formHeader}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.formTitle}>{title}</Text>
-              {subtitle ? <Text style={styles.formSubtitle}>{subtitle}</Text> : null}
-            </View>
-            <TouchableOpacity onPress={onClose} style={styles.formCloseBtn} hitSlop={6} accessibilityLabel="Fechar">
-              <X size={20} color={colors.text} strokeWidth={2.2} />
-            </TouchableOpacity>
-          </View>
-
-          <ScrollView
-            contentContainerStyle={styles.formScroll}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-          >
-            {children}
-          </ScrollView>
-
-          <View
-            style={[
-              styles.formFooter,
-              {
-                borderTopColor: isDark ? colors.border : 'rgba(0,0,0,0.06)',
-                paddingBottom: formFooterBottomPad(insets.bottom),
-              },
-            ]}
-          >
-            <TouchableOpacity
-              style={[styles.primaryBtn, bloqueado && { opacity: submitting ? 0.7 : 0.5 }]}
-              onPress={onSubmit}
-              disabled={bloqueado}
-              activeOpacity={0.85}
-            >
-              {submitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>{submitLabel}</Text>}
-            </TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
-        {overlay}
-        <AppToastHost topOffset={Math.max(insets.top, 12) + 8} />
+        {children}
+      </ScrollView>
+      <View style={{ paddingTop: 12 }}>
+        <SheetPrimaryButton label={submitLabel} onPress={onSubmit} loading={submitting} disabled={submitDisabled} />
       </View>
-    </Modal>
+    </SheetModal>
   );
 }

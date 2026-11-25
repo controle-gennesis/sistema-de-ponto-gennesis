@@ -9,6 +9,7 @@ import {
   Animated,
   Easing,
   Alert,
+  Switch,
   Dimensions,
   Platform,
   StatusBar,
@@ -37,7 +38,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import { formatCpfDisplay } from '../lib/cpf';
 import { formatMenuDisplayName } from '../lib/formatDisplayName';
 import UserAvatar from './UserAvatar';
-import { GlassBlur } from './GlassBg';
+import { requestLogoutConfirm } from './AuthPrompts';
 import type { RootStackParamList } from '../../App';
 
 interface MenuProps {
@@ -241,18 +242,8 @@ export default function Menu({ visible, onClose }: MenuProps) {
   }, [visible, slideAnim, itemsAnim]);
 
   const handleLogout = () => {
-    Alert.alert('Sair', 'Tem certeza que deseja sair?', [
-      { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Sair',
-        style: 'destructive',
-        onPress: () => {
-          closeThen(() => {
-            void logout();
-          });
-        },
-      },
-    ]);
+    // Fecha o menu e abre a confirmação «Sair da conta?» (janela do app, na raiz).
+    closeThen(() => requestLogoutConfirm());
   };
 
   const headerOpacity = itemsAnim.interpolate({
@@ -300,7 +291,9 @@ export default function Menu({ visible, onClose }: MenuProps) {
                         ? insets.top
                         : StatusBar.currentHeight ?? 24
                       : insets.top) + 12,
-                  paddingBottom: Math.max(insets.bottom, 16),
+                  // Android: a barra de navegação (3 botões/gestos) fica por cima do pé do menu («Sair»);
+                  // sobra o tamanho dela mais uma folga, com piso de 56 caso o aparelho não informe a altura.
+                  paddingBottom: Platform.OS === 'android' ? Math.max(insets.bottom + 20, 56) : Math.max(insets.bottom, 16),
                 },
               ]}
             >
@@ -352,7 +345,7 @@ export default function Menu({ visible, onClose }: MenuProps) {
                     accessibilityRole="button"
                     accessibilityLabel="Fechar menu"
                   >
-                    <GlassBlur radius={20} />
+                    {/* Só o ícone, sem fundo (iPhone e Android). */}
                     <X size={20} color={colors.text} strokeWidth={2.2} />
                   </TouchableOpacity>
                 </View>
@@ -387,20 +380,21 @@ export default function Menu({ visible, onClose }: MenuProps) {
                   },
                 ]}
               >
-                <TouchableOpacity
-                  style={styles.themeRow}
-                  onPress={toggleTheme}
-                  activeOpacity={0.65}
-                >
+                <View style={styles.themeRow}>
                   {isDark ? (
-                    <Sun size={20} color={colors.text} strokeWidth={2} />
-                  ) : (
                     <Moon size={20} color={colors.text} strokeWidth={2} />
+                  ) : (
+                    <Sun size={20} color={colors.text} strokeWidth={2} />
                   )}
-                  <Text style={[styles.footerLabel, { color: colors.text }]}>
-                    {isDark ? 'Tema claro' : 'Tema escuro'}
-                  </Text>
-                </TouchableOpacity>
+                  <Text style={[styles.footerLabel, { color: colors.text, flex: 1 }]}>Tema escuro</Text>
+                  <Switch
+                    value={isDark}
+                    onValueChange={toggleTheme}
+                    accessibilityLabel="Tema escuro"
+                    trackColor={{ false: isDark ? '#4b5563' : '#d1d5db', true: '#fca5a5' }}
+                    thumbColor={isDark ? colors.primary : '#f4f4f5'}
+                  />
+                </View>
                 <TouchableOpacity
                   style={styles.themeRow}
                   onPress={handleLogout}

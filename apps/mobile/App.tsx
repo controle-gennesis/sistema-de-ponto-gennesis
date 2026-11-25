@@ -7,7 +7,7 @@ import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/
 import { navigationRef } from './src/navigation/navigationRef';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppToastHost, RootOverlayToastHost } from './src/components/AppToast';
 
 import LoginScreen from './src/screens/LoginScreen';
@@ -39,10 +39,11 @@ import ThemeBackground, { ThemePatternFill } from './src/components/ThemeBackgro
 import BottomTabNavigator from './src/navigation/BottomTabNavigator';
 
 import { AuthProvider, useAuth } from './src/context/AuthContext';
-import { ThemeProvider, useTheme } from './src/context/ThemeContext';
+import { ThemeProvider, useTheme, withLightTheme } from './src/context/ThemeContext';
 import { NotificationsProvider } from './src/notifications/NotificationsContext';
 import { ChromeVisibilityProvider } from './src/navigation/ChromeVisibilityContext';
 import NotificationsSheet from './src/components/NotificationsSheet';
+import { AuthPromptsHost } from './src/components/AuthPrompts';
 import { useOfflineSync } from './src/hooks/useOfflineSync';
 
 export type RootStackParamList = {
@@ -83,16 +84,22 @@ export type RootStackParamList = {
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const queryClient = new QueryClient();
 
-const MIN_SPLASH_MS = 900;
+const MIN_SPLASH_MS = 1200;
 
 /**
  * As telas da pilha são transparentes (o padrão aparece atrás). Durante a animação de abrir/voltar,
  * duas telas transparentes ficam uma por cima da outra. Aqui cada página leva o próprio fundo opaco.
  */
-function withOpaqueBackground<P extends object>(Screen: React.ComponentType<P>) {
+function withOpaqueBackground<P extends object>(
+  Screen: React.ComponentType<P>,
+  // `navPad`: no Android a barra de navegação do celular (3 botões/gestos) fica por cima do app; a tela
+  // termina acima dela. Fica de fora quem já cuida disso (abas) ou usa a tela inteira (câmera).
+  { navPad = true }: { navPad?: boolean } = {},
+) {
   function Wrapped(props: P) {
+    const navInset = useSafeAreaInsets().bottom;
     return (
-      <View style={{ flex: 1 }}>
+      <View style={{ flex: 1, paddingBottom: navPad && Platform.OS === 'android' ? navInset : 0 }}>
         <ThemePatternFill />
         <Screen {...props} />
       </View>
@@ -102,7 +109,27 @@ function withOpaqueBackground<P extends object>(Screen: React.ComponentType<P>) 
   return Wrapped;
 }
 
-const OpaqueBottomTabNavigator = withOpaqueBackground(BottomTabNavigator);
+/** Só a folga da barra de navegação do Android (sem o fundo opaco): telas de Empreitas. */
+function withAndroidNavPad<P extends object>(Screen: React.ComponentType<P>) {
+  function Padded(props: P) {
+    const navInset = useSafeAreaInsets().bottom;
+    return (
+      <View style={{ flex: 1, paddingBottom: Platform.OS === 'android' ? navInset : 0 }}>
+        <Screen {...props} />
+      </View>
+    );
+  }
+  Padded.displayName = `NavPad(${Screen.displayName ?? Screen.name ?? 'Screen'})`;
+  return Padded;
+}
+
+const PaddedEmpreitaHomeScreen = withAndroidNavPad(EmpreitaHomeScreen);
+const PaddedEmpreitaServicoScreen = withAndroidNavPad(EmpreitaServicoScreen);
+
+// O login é sempre no tema claro, mesmo que a pessoa tenha usado o escuro dentro do app.
+const LightLoginScreen = withLightTheme(LoginScreen);
+
+const OpaqueBottomTabNavigator = withOpaqueBackground(BottomTabNavigator, { navPad: false });
 const OpaquePunchScreen = withOpaqueBackground(PunchScreen);
 const OpaqueTimeRecordsScreen = withOpaqueBackground(TimeRecordsScreen);
 const OpaqueFuelRequestsScreen = withOpaqueBackground(FuelRequestsScreen);
@@ -120,7 +147,7 @@ const OpaqueKanbanBoardScreen = withOpaqueBackground(KanbanBoardScreen);
 const OpaqueKanbanCardScreen = withOpaqueBackground(KanbanCardScreen);
 const OpaqueDpRequestsScreen = withOpaqueBackground(DpRequestsScreen);
 const OpaqueGestaoOsDetailScreen = withOpaqueBackground(GestaoOsDetailScreen);
-const OpaqueGestaoOsQrScreen = withOpaqueBackground(GestaoOsQrScreen);
+const OpaqueGestaoOsQrScreen = withOpaqueBackground(GestaoOsQrScreen, { navPad: false });
 const OpaqueGestaoOsUnplannedScreen = withOpaqueBackground(GestaoOsUnplannedScreen);
 const OpaqueFieldAssistantScreen = withOpaqueBackground(FieldAssistantScreen);
 
@@ -186,7 +213,7 @@ function AppNavigator() {
           <NavigationContainer ref={navigationRef} theme={navigationTheme}>
             <Stack.Navigator screenOptions={{ headerShown: false }}>
               {isEmpreiteiro ? (
-                <Stack.Screen name="EmpreitaHome" component={EmpreitaHomeScreen} />
+                <Stack.Screen name="EmpreitaHome" component={PaddedEmpreitaHomeScreen} />
               ) : (
                 <Stack.Screen name="Main" component={BottomTabNavigator} />
               )}
@@ -225,8 +252,8 @@ function AppNavigator() {
               animation: 'slide_from_right',
             }}
           >
-            <Stack.Screen name="EmpreitaHome" component={EmpreitaHomeScreen} />
-            <Stack.Screen name="EmpreitaServico" component={EmpreitaServicoScreen} />
+            <Stack.Screen name="EmpreitaHome" component={PaddedEmpreitaHomeScreen} />
+            <Stack.Screen name="EmpreitaServico" component={PaddedEmpreitaServicoScreen} />
           </Stack.Navigator>
         ) : isAuthenticated ? (
           <>
@@ -275,7 +302,7 @@ function AppNavigator() {
             }}
           >
             <Stack.Screen name="Login">
-              {() => <LoginScreen fromBootSplash active={bootReady} />}
+              {() => <LightLoginScreen fromBootSplash active={bootReady} />}
             </Stack.Screen>
           </Stack.Navigator>
         )}
@@ -325,6 +352,7 @@ export default function App() {
               <NotificationsProvider>
                 <ChromeVisibilityProvider>
                   <OfflineSyncHost />
+                  <AuthPromptsHost />
                   <AppNavigator />
                   <StatusBarComponent />
                   <AppToastHost />

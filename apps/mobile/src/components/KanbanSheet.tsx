@@ -172,7 +172,9 @@ export default function KanbanSheet({
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
         <Animated.View
           style={{
-            marginBottom: -insetBottom,
+            // iOS: a raiz do Modal termina acima da barra inicial, então a folha desce essa área.
+            // Android: a folha fica inteira na tela e o padding de baixo já reserva a barra de navegação.
+            marginBottom: Platform.OS === 'ios' ? -insetBottom : 0,
             transform: [
               { translateY: slide.interpolate({ inputRange: [0, 1], outputRange: [520, 0] }) },
             ],
@@ -200,10 +202,28 @@ export default function KanbanSheet({
                 </TouchableOpacity>
               </View>
             ) : keyboardOpen ? (
-              // Teclado aberto: só o título, para sobrar espaço para a lista.
-              <Text style={styles.titleCompact}>{title}</Text>
+              // Teclado aberto: só o título (com o X), para sobrar espaço para a lista.
+              <View style={styles.compactRow}>
+                <Text style={[styles.titleCompact, { flex: 1, marginBottom: 0 }]}>{title}</Text>
+                <TouchableOpacity
+                  onPress={onClose}
+                  style={styles.roundBtn}
+                  hitSlop={8}
+                  accessibilityLabel="Fechar"
+                >
+                  <X size={18} color={C.iconStrong} strokeWidth={2.2} />
+                </TouchableOpacity>
+              </View>
             ) : (
               <View style={styles.hero}>
+                <TouchableOpacity
+                  onPress={onClose}
+                  style={[styles.roundBtn, styles.heroClose]}
+                  hitSlop={8}
+                  accessibilityLabel="Fechar"
+                >
+                  <X size={18} color={C.iconStrong} strokeWidth={2.2} />
+                </TouchableOpacity>
                 {Icon ? (
                   <View style={styles.heroIcon}>
                     <Icon size={26} color={C.accent} strokeWidth={2.1} />
@@ -268,6 +288,8 @@ function getStyles(C: {
     leftHeroText: { flex: 1 },
     leftSubtitle: { marginTop: 6, fontSize: 14, lineHeight: 20, color: C.body, paddingRight: 6 },
     hero: { alignItems: 'center', marginBottom: 20 },
+    heroClose: { position: 'absolute', top: -6, right: -6, zIndex: 2 },
+    compactRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
     heroIcon: {
       width: 58,
       height: 58,

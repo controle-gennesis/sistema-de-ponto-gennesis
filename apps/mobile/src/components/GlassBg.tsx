@@ -52,14 +52,17 @@ export function GlassBlur({
   radius = 22,
   frosted = false,
   white = false,
+  glassOnIos = false,
 }: {
   radius?: number;
   frosted?: boolean;
   /** Fundo branco liso (tema escuro: cor do cartão), com a borda fininha. */
   white?: boolean;
+  /** No iPhone ignora `white` e usa o vidro (Liquid Glass no iOS 26); no Android continua branco liso. */
+  glassOnIos?: boolean;
 }) {
   const { colors, isDark } = useTheme();
-  if (white) {
+  if (white && !(glassOnIos && Platform.OS === 'ios')) {
     return (
       <View
         pointerEvents="none"

@@ -111,9 +111,6 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/logo-auth.png",
-          "imageWidth": 104,
-          "resizeMode": "contain",
           "backgroundColor": "#b13030"
         }
       ],

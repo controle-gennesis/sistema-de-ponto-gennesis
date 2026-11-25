@@ -4,13 +4,13 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  Alert,
   FlatList,
   ScrollView,
   TextInput,
   Modal,
   ActivityIndicator,
   Dimensions,
+  Platform,
   type ListRenderItemInfo,
 } from 'react-native';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
@@ -34,6 +34,7 @@ import {
 } from 'lucide-react-native';
 import Svg, { Circle, Defs, LinearGradient as SvgLinearGradient, Rect, Stop } from 'react-native-svg';
 import Toast from 'react-native-toast-message';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AppHeader, { HeaderIconButton } from '../../components/AppHeader';
 import KanbanSheet from '../../components/KanbanSheet';
 import {
@@ -497,6 +498,9 @@ export default function KanbanBoardScreen() {
   // A faixa de filtros fica dentro da área do quadro, em cima das colunas: a altura dela sai do espaço
   // das colunas, senão o fim de cada coluna é cortado.
   const [filterBarH, setFilterBarH] = useState(0);
+  // Android: a barra de navegação (3 botões/gestos) fica por cima do app; o quadro termina acima dela.
+  const safeInsets = useSafeAreaInsets();
+  const menuBottomInset = safeInsets.bottom;
   const columnHeight = Math.max(0, boardAreaH - filterBarH - BOARD_GAP * 2);
   const styles = useMemo(
     () => getStyles(colors, isDark, columnHeight),
@@ -517,6 +521,7 @@ export default function KanbanBoardScreen() {
   const [savingColumn, setSavingColumn] = useState(false);
   const [columnEdit, setColumnEdit] = useState<KanbanColumn | null>(null);
   const [archivedOpen, setArchivedOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [labelsOpen, setLabelsOpen] = useState(false);
 
   useEffect(() => {
@@ -792,20 +797,7 @@ export default function KanbanBoardScreen() {
         rightAction={
           <View style={styles.headerBtns}>
             <HeaderIconButton
-              onPress={() => {
-                const options: Array<{ text: string; onPress?: () => void; style?: 'cancel' }> = [
-                  { text: 'Cards arquivados', onPress: () => setArchivedOpen(true) },
-                ];
-                if (!readOnly) {
-                  options.push({ text: 'Etiquetas do quadro', onPress: () => setLabelsOpen(true) });
-                }
-                options.push({
-                  text: 'Trocar de quadro',
-                  onPress: () => navigation.navigate('KanbanBoards'),
-                });
-                options.push({ text: 'Cancelar', style: 'cancel' });
-                Alert.alert(displayTitle || 'Quadro', undefined, options);
-              }}
+              onPress={() => setMenuOpen(true)}
               accessibilityLabel="Mais opções"
             >
               <MoreHorizontal size={22} color={colors.text} strokeWidth={2.1} />
@@ -814,16 +806,34 @@ export default function KanbanBoardScreen() {
         }
       />
 
-      <Modal visible={searchOpen} animationType="fade" onRequestClose={closeSearch}>
-        <View style={[styles.safe, { paddingTop: 48 }]}>
+      <Modal
+        visible={searchOpen}
+        animationType="slide"
+        presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : undefined}
+        // Android: folha com cantos de 28 sobre fundo escurecido, como as outras janelas do app (no iPhone é o pageSheet).
+        transparent={Platform.OS === 'android'}
+        statusBarTranslucent
+        navigationBarTranslucent
+        onRequestClose={closeSearch}
+      >
+        <View style={Platform.OS === 'android' ? styles.searchBackdrop : { flex: 1 }}>
+        <View
+          style={[
+            styles.safe,
+            { paddingTop: Platform.OS === 'ios' ? 18 : 20 },
+            Platform.OS === 'android' && [styles.searchSheetAndroid, { marginTop: safeInsets.top + 28 }],
+          ]}
+        >
           <View style={styles.searchBar}>
-            <Search size={18} color={colors.textSecondary} />
+            <Search size={17} color={colors.textSecondary} />
             <TextInput
               value={searchText}
               onChangeText={setSearchText}
-              placeholder="Buscar cards e quadros"
+              placeholder="Pesquisar"
               placeholderTextColor={colors.textSecondary}
               autoFocus
+              autoCorrect={false}
+              clearButtonMode="while-editing"
               returnKeyType="search"
               style={styles.searchInput}
             />
@@ -831,7 +841,7 @@ export default function KanbanBoardScreen() {
               <Text style={styles.searchCancel}>Cancelar</Text>
             </TouchableOpacity>
           </View>
-          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 14, paddingBottom: 40 }}>
+          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 16, paddingBottom: 40 + (Platform.OS === 'android' ? menuBottomInset : 0) }}>
             {searchText.trim().length < 2 ? (
               <Text style={styles.searchHint}>Digite ao menos 2 letras.</Text>
             ) : searchResults.cards.length === 0 && searchResults.boards.length === 0 ? (
@@ -882,6 +892,7 @@ export default function KanbanBoardScreen() {
             ))}
           </ScrollView>
         </View>
+        </View>
       </Modal>
 
       {(resolvingDefault || (boardQuery.isLoading && !board)) ? (
@@ -892,14 +903,6 @@ export default function KanbanBoardScreen() {
           onLayout={(e) => setBoardAreaH(e.nativeEvent.layout.height)}
         >
           <View style={styles.filterBar} onLayout={(e) => setFilterBarH(e.nativeEvent.layout.height)}>
-            <TouchableOpacity
-              onPress={() => setSearchOpen(true)}
-              activeOpacity={0.75}
-              accessibilityLabel="Buscar"
-              style={styles.searchBtn}
-            >
-              <Search size={16} color={colors.textSecondary} strokeWidth={2.2} />
-            </TouchableOpacity>
             <ScrollView
               horizontal
               style={{ flex: 1 }}
@@ -971,6 +974,45 @@ export default function KanbanBoardScreen() {
           />
         </View>
       )}
+
+      <KanbanSheet
+        visible={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        title={displayTitle || 'Quadro'}
+        subtitle="Opções do quadro"
+        leftHeader
+      >
+        <ScrollView
+          bounces={false}
+          showsVerticalScrollIndicator={false}
+          style={{ maxHeight: Dimensions.get('window').height * 0.6 }}
+        >
+        {[
+          { key: 'search', label: 'Buscar cards e quadros', Icon: Search, run: () => setSearchOpen(true) },
+          { key: 'archived', label: 'Cards arquivados', Icon: Archive, run: () => setArchivedOpen(true) },
+          ...(readOnly
+            ? []
+            : [{ key: 'labels', label: 'Etiquetas do quadro', Icon: Tag, run: () => setLabelsOpen(true) }]),
+          { key: 'boards', label: 'Trocar de quadro', Icon: LayoutGrid, run: () => navigation.navigate('KanbanBoards') },
+        ].map(({ key, label, Icon, run }) => (
+          <TouchableOpacity
+            key={key}
+            style={styles.menuRow}
+            activeOpacity={0.7}
+            onPress={() => {
+              setMenuOpen(false);
+              // Espera a folha do menu sair antes de abrir a próxima janela.
+              setTimeout(run, 280);
+            }}
+          >
+            <View style={styles.menuIcon}>
+              <Icon size={18} color={colors.primary} strokeWidth={2.1} />
+            </View>
+            <Text style={styles.menuLabel}>{label}</Text>
+          </TouchableOpacity>
+        ))}
+        </ScrollView>
+      </KanbanSheet>
 
       <KanbanSheet
         visible={!!addColId}
@@ -1340,28 +1382,63 @@ function getStyles(colors: any, isDark: boolean, columnHeight: number) {
       justifyContent: 'center',
     },
     headerBtns: { flexDirection: 'row', alignItems: 'center' },
+    menuRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 14,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      borderRadius: 16,
+      marginBottom: 8,
+      backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : '#f3f4f6',
+    },
+    menuIcon: {
+      width: 36,
+      height: 36,
+      borderRadius: 11,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: isDark ? 'rgba(248,113,113,0.14)' : 'rgba(206,55,54,0.1)',
+    },
+    menuLabel: { flex: 1, fontSize: 15, fontWeight: '600', color: colors.text },
+    // Padrão iPhone: busca em pílula cinza translúcida e resultados em cartões.
+    searchBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' },
+    searchSheetAndroid: {
+      borderTopLeftRadius: 28,
+      borderTopRightRadius: 28,
+      overflow: 'hidden',
+      backgroundColor: isDark ? '#111827' : '#ffffff',
+    },
     searchBar: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 10,
-      marginHorizontal: 14,
+      gap: 8,
+      marginHorizontal: 16,
       marginBottom: 6,
-      paddingHorizontal: 12,
+      paddingHorizontal: 14,
       height: 44,
-      borderRadius: 12,
-      backgroundColor: colors.surface,
-      borderWidth: 1,
-      borderColor: colors.border,
+      borderRadius: 22,
+      backgroundColor: isDark ? 'rgba(118,118,128,0.24)' : 'rgba(118,118,128,0.12)',
     },
-    searchBtn: { width: 34, height: 34, marginLeft: 12, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
-    searchInput: { flex: 1, fontSize: 15, color: colors.text, paddingVertical: 0 },
-    searchCancel: { color: colors.primary, fontWeight: '700', fontSize: 13 },
-    searchHint: { color: colors.textSecondary, fontSize: 13, paddingVertical: 10, paddingHorizontal: 4 },
-    searchSection: { color: colors.textSecondary, fontSize: 11, fontWeight: '800', textTransform: 'uppercase', marginTop: 10, marginBottom: 6, paddingHorizontal: 4 },
-    searchRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, paddingHorizontal: 6, borderRadius: 10 },
-    searchSwatch: { width: 30, height: 24, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
-    searchTitle: { color: colors.text, fontSize: 14, fontWeight: '700' },
-    searchSub: { color: colors.textSecondary, fontSize: 12, marginTop: 1 },
+    searchInput: { flex: 1, fontSize: 16, color: colors.text, paddingVertical: 0 },
+    searchCancel: { color: colors.primary, fontWeight: '600', fontSize: 16 },
+    searchHint: { color: colors.textSecondary, fontSize: 14, paddingVertical: 12, paddingHorizontal: 4 },
+    searchSection: { color: colors.textSecondary, fontSize: 13, fontWeight: '600', marginTop: 14, marginBottom: 8, paddingHorizontal: 4 },
+    searchRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      borderRadius: 16,
+      marginBottom: 8,
+      backgroundColor: isDark ? colors.card : colors.surface,
+      borderWidth: StyleSheet.hairlineWidth * 1.5,
+      borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15, 23, 42, 0.08)',
+    },
+    searchSwatch: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+    searchTitle: { color: colors.text, fontSize: 15, fontWeight: '600' },
+    searchSub: { color: colors.textSecondary, fontSize: 13, marginTop: 2 },
     headerBtn: { width: 40, height: 44, alignItems: 'center', justifyContent: 'center' },
 
     titleRow: {

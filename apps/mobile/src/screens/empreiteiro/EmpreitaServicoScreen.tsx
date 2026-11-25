@@ -55,6 +55,7 @@ import {
   ListToolbar,
   SummaryCard,
   UnderlineTabs,
+  useHeaderGlass,
 } from './EmpreiteiroUi';
 import MedicaoDetalheModal from './MedicaoDetalheModal';
 import MedicaoFormModal from './MedicaoFormModal';
@@ -70,6 +71,7 @@ const PESSOA_VAZIA: PessoaForm = { name: '', role: '', phone: '', document: '', 
 
 export default function EmpreitaServicoScreen({ navigation, route }: Props) {
   const { colors } = useTheme();
+  const { glass, headerHeight, onHeaderHeight, scrollProps } = useHeaderGlass();
   const cardBox = useCardStyle();
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -197,7 +199,7 @@ export default function EmpreitaServicoScreen({ navigation, route }: Props) {
 
   return (
     <View style={styles.root}>
-      <EmpreiteiroHeader title="Contrato de Serviço" onBack={() => navigation.goBack()} />
+      <EmpreiteiroHeader title="Contrato de Serviço" onBack={() => navigation.goBack()} glass={glass} onHeight={onHeaderHeight} />
       {carregando ? (
         <View style={styles.center}>
           <ActivityIndicator color={colors.primary} />
@@ -208,7 +210,8 @@ export default function EmpreitaServicoScreen({ navigation, route }: Props) {
         </View>
       ) : (
         <ScrollView
-          contentContainerStyle={styles.content}
+          {...scrollProps}
+          contentContainerStyle={[styles.content, { paddingTop: headerHeight }]}
           refreshControl={
             <RefreshControl
               refreshing={puxando}

@@ -18,11 +18,12 @@ import {
   CalendarDays,
   ChevronRight,
   Filter,
-  Plus,
   Search,
   X,
 } from 'lucide-react-native';
 import AppHeader from '../../components/AppHeader';
+import CreateListButton from '../../components/CreateListButton';
+import { GlassBlur } from '../../components/GlassBg';
 import RdoFilterSheet, {
   EMPTY_RDO_FILTERS,
   RDO_STATUS_OPTIONS,
@@ -294,11 +295,12 @@ export default function DiarioObraListScreen() {
       />
 
       <View style={styles.searchRow}>
-        <View style={styles.searchBox}>
+        <View style={[styles.searchBox, styles.searchBoxGlass]}>
+          <GlassBlur white radius={22} />
           <Search size={16} color={colors.textSecondary} strokeWidth={2} />
           <TextInput
             style={styles.searchInput}
-            placeholder="Buscar obra ou contrato..."
+            placeholder="Pesquisar"
             placeholderTextColor={colors.textSecondary}
             value={search}
             onChangeText={setSearch}
@@ -317,18 +319,11 @@ export default function DiarioObraListScreen() {
           activeOpacity={0.75}
           accessibilityLabel="Filtros"
         >
-          <Filter size={18} color={filtersActive ? '#fff' : colors.primary} strokeWidth={2.2} />
+          {!filtersActive ? <GlassBlur white /> : null}
+          <Filter size={18} color={filtersActive ? '#fff' : isDark ? '#ffffff' : '#000000'} strokeWidth={2.2} />
           {filtersActive ? <View style={styles.filterDot} /> : null}
         </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.newBtn}
-          activeOpacity={0.85}
-          onPress={() => setNewOpen(true)}
-          accessibilityRole="button"
-          accessibilityLabel="Novo Diário de Obra"
-        >
-          <Plus size={22} color="#fff" strokeWidth={2.5} />
-        </TouchableOpacity>
+        <CreateListButton onPress={() => setNewOpen(true)} accessibilityLabel="Novo Diário de Obra" />
       </View>
 
       {filters.status !== 'all' || filters.contratoId || filters.obraId ? (
@@ -479,19 +474,21 @@ function getStyles(colors: any, isDark: boolean) {
     chipCount: { fontSize: 12, fontWeight: '700', color: colors.textSecondary, opacity: 0.7 },
     chipCountActive: { color: 'rgba(255,255,255,0.85)', opacity: 1 },
 
-    searchRow: { flexDirection: 'row', alignItems: 'stretch', gap: 10, marginBottom: 16 },
+    searchRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16 },
     searchBox: {
       flex: 1,
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 10,
-      backgroundColor: fieldBg,
-      borderRadius: 14,
+      gap: 8,
+      backgroundColor: isDark ? colors.card : '#ffffff',
+      borderRadius: 22,
       paddingHorizontal: 14,
-      minHeight: 48,
-      borderWidth: StyleSheet.hairlineWidth * 1.5,
-      borderColor: line,
+      minHeight: 44,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: isDark ? 'transparent' : 'rgba(15, 23, 42, 0.08)',
     },
+    // O fundo e a borda vêm do GlassBlur.
+    searchBoxGlass: { backgroundColor: 'transparent', borderWidth: 0 },
     searchInput: {
       flex: 1,
       paddingVertical: Platform.OS === 'ios' ? 12 : 8,
@@ -499,14 +496,12 @@ function getStyles(colors: any, isDark: boolean) {
       fontSize: 15,
     },
     filterBtn: {
-      width: 48,
-      borderRadius: 14,
+      width: 44,
+      height: 44,
+      borderRadius: 22,
       alignItems: 'center',
       justifyContent: 'center',
-      alignSelf: 'stretch',
-      backgroundColor: fieldBg,
-      borderWidth: StyleSheet.hairlineWidth * 1.5,
-      borderColor: line,
+      backgroundColor: 'transparent',
     },
     filterBtnActive: { backgroundColor: colors.primary, borderColor: colors.primary },
     filterDot: {
@@ -517,14 +512,6 @@ function getStyles(colors: any, isDark: boolean) {
       height: 7,
       borderRadius: 4,
       backgroundColor: '#fff',
-    },
-    newBtn: {
-      width: 48,
-      borderRadius: 14,
-      alignItems: 'center',
-      justifyContent: 'center',
-      alignSelf: 'stretch',
-      backgroundColor: colors.primary,
     },
 
     listHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },

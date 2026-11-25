@@ -358,6 +358,8 @@ function FloatingGlassButton({
       style={[
         styles.floatToday,
         side === 'right' && { left: undefined, right: 20 },
+        // Android: sem sombra no contêiner (a sombra leve fica no botão).
+        Platform.OS === 'android' && { shadowOpacity: 0, elevation: 0 },
         {
           opacity: appear,
           transform: [
@@ -375,8 +377,20 @@ function FloatingGlassButton({
         accessibilityRole="button"
         accessibilityLabel={accessibilityLabel}
       >
-        <View style={[styles.floatTodayInner, round && styles.floatRound]}>
-          <GlassBlur radius={999} />
+        <View
+          style={[
+            styles.floatTodayInner,
+            round && styles.floatRound,
+            // Android: sem vidro nem cartão. Os dois botões são vermelhos lisos, com texto/ícone brancos
+            // e sombra leve; a sombra do Android é a elevação, que precisa do fundo na própria View.
+            Platform.OS === 'android' && {
+              backgroundColor: colors.primary,
+              borderWidth: 0,
+              elevation: 3,
+            },
+          ]}
+        >
+          {Platform.OS === 'ios' ? <GlassBlur radius={999} /> : null}
           {label}
         </View>
       </Pressable>
@@ -1631,31 +1645,65 @@ export default function AgendaScreen() {
             </View>
           ) : null}
 
-          <FloatingGlassButton
-            onPress={goToday}
-            isDark={isDark}
-            colors={colors}
-            styles={styles}
-            accessibilityLabel="Ir para hoje"
-          >
-            <Text style={styles.floatTodayText}>Hoje</Text>
-          </FloatingGlassButton>
-          <FloatingGlassButton
-            side="right"
-            round
-            onPress={() => (googleStatus?.connected ? void runGoogleSync() : openGoogleMenu())}
-            onLongPress={openGoogleMenu}
-            isDark={isDark}
-            colors={colors}
-            styles={styles}
-            accessibilityLabel="Atualizar com o Google Agenda"
-          >
-            {syncingGoogle ? (
-              <ActivityIndicator size="small" color={isDark ? '#ffffff' : '#000000'} />
-            ) : (
-              <CalendarSync size={23} color={isDark ? '#ffffff' : '#000000'} strokeWidth={2} />
-            )}
-          </FloatingGlassButton>
+          {Platform.OS === 'android' ? (
+            // Android: uma barra única, escura e centralizada, com «Hoje» e o botão do Google lado a lado.
+            <View style={styles.androidBarWrap} pointerEvents="box-none">
+              <View style={styles.androidBar}>
+                <TouchableOpacity
+                  onPress={goToday}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel="Ir para hoje"
+                  style={styles.androidBarToday}
+                >
+                  <Text style={styles.androidBarText}>Hoje</Text>
+                </TouchableOpacity>
+                <View style={styles.androidBarDivider} />
+                <TouchableOpacity
+                  onPress={() => (googleStatus?.connected ? void runGoogleSync() : openGoogleMenu())}
+                  onLongPress={openGoogleMenu}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel="Atualizar com o Google Agenda"
+                  style={styles.androidBarSync}
+                >
+                  {syncingGoogle ? (
+                    <ActivityIndicator size="small" color="#ffffff" />
+                  ) : (
+                    <CalendarSync size={18} color="#ffffff" strokeWidth={2} />
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            <>
+            <FloatingGlassButton
+              onPress={goToday}
+              isDark={isDark}
+              colors={colors}
+              styles={styles}
+              accessibilityLabel="Ir para hoje"
+            >
+              <Text style={styles.floatTodayText}>Hoje</Text>
+            </FloatingGlassButton>
+            <FloatingGlassButton
+              side="right"
+              round
+              onPress={() => (googleStatus?.connected ? void runGoogleSync() : openGoogleMenu())}
+              onLongPress={openGoogleMenu}
+              isDark={isDark}
+              colors={colors}
+              styles={styles}
+              accessibilityLabel="Atualizar com o Google Agenda"
+            >
+              {syncingGoogle ? (
+                <ActivityIndicator size="small" color={isDark ? '#ffffff' : '#000000'} />
+              ) : (
+                <CalendarSync size={23} color={isDark ? '#ffffff' : '#000000'} strokeWidth={2} />
+              )}
+            </FloatingGlassButton>
+            </>
+          )}
         </View>
       ) : (
         <View style={styles.tkWrap}>
@@ -2424,6 +2472,27 @@ function getStyles(colors: any, isDark: boolean) {
     bodyPad: { paddingHorizontal: 20, paddingBottom: 40 },
     tasksScroll: { flex: 1 },
     tasksPad: { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 40 },
+    androidBarWrap: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: 10,
+      alignItems: 'center',
+      zIndex: 10,
+    },
+    androidBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      height: 42,
+      borderRadius: 21,
+      overflow: 'hidden',
+      backgroundColor: isDark ? '#374151' : '#1f2937',
+      elevation: 6,
+    },
+    androidBarToday: { paddingLeft: 18, paddingRight: 14, height: 42, justifyContent: 'center' },
+    androidBarText: { fontSize: 13, fontWeight: '700', color: '#ffffff', letterSpacing: 0.2 },
+    androidBarDivider: { width: 1, height: 16, backgroundColor: 'rgba(255,255,255,0.22)' },
+    androidBarSync: { width: 44, height: 42, alignItems: 'center', justifyContent: 'center' },
     floatToday: {
       zIndex: 10,
       position: 'absolute',

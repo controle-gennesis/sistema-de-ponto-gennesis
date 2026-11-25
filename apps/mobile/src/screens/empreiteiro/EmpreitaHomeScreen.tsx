@@ -37,7 +37,7 @@ import {
   maskPhone,
   statusServico,
 } from '../../services/empreiteiros';
-import { useCardStyle, Avatar, Badge, EmpreiteiroHeader, InfoList, KpiRow, UnderlineTabs } from './EmpreiteiroUi';
+import { useCardStyle, Avatar, Badge, EmpreiteiroHeader, InfoList, KpiRow, UnderlineTabs, useHeaderGlass } from './EmpreiteiroUi';
 import { ServiceIcon } from './ServiceIcon';
 import type { RootStackParamList } from '../../../App';
 
@@ -47,6 +47,7 @@ type Aba = 'servicos' | 'dados';
 
 export default function EmpreitaHomeScreen({ navigation }: Props) {
   const { colors } = useTheme();
+  const { glass, headerHeight, onHeaderHeight, scrollProps } = useHeaderGlass();
   const cardBox = useCardStyle();
   const { user } = useAuth();
   const empreiteiroId = user?.empreiteiro?.id ?? '';
@@ -66,7 +67,7 @@ export default function EmpreitaHomeScreen({ navigation }: Props) {
 
   return (
     <View style={styles.root}>
-      <EmpreiteiroHeader title="Empreitas" />
+      <EmpreiteiroHeader title="Empreitas" glass={glass} onHeight={onHeaderHeight} />
       {isLoading ? (
         <View style={styles.center}>
           <ActivityIndicator color={colors.primary} />
@@ -80,7 +81,8 @@ export default function EmpreitaHomeScreen({ navigation }: Props) {
         </View>
       ) : (
         <ScrollView
-          contentContainerStyle={styles.content}
+          {...scrollProps}
+          contentContainerStyle={[styles.content, { paddingTop: headerHeight }]}
           refreshControl={
             <RefreshControl
               refreshing={puxando}

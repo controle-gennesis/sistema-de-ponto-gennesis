@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Animated, Easing, StyleSheet } from 'react-native';
+import { Animated, Easing, StyleSheet, View } from 'react-native';
 import { useIsFocused, useNavigation, useNavigationState } from '@react-navigation/native';
 import { useTheme } from '../context/ThemeContext';
 
@@ -124,8 +124,23 @@ export default function TabScreenTransition({ children }: Props) {
   );
 }
 
+/**
+ * TESTE: `false` tira o fade ao trocar de aba. O vidro nativo do iOS 26 (Liquid Glass) não desenha dentro
+ * de uma view com opacidade animada; sem o fade ele aparece em todas as listas. Volte para `true` para
+ * recuperar a transição.
+ */
+const TAB_FADE_ENABLED = false;
+
 function wrapTabScreen<P extends object>(Screen: React.ComponentType<P>) {
   function Wrapped(props: P) {
+    const { colors } = useTheme();
+    if (!TAB_FADE_ENABLED) {
+      return (
+        <View style={[styles.root, { backgroundColor: colors.screenRoot }]}>
+          <Screen {...props} />
+        </View>
+      );
+    }
     return (
       <TabScreenTransition>
         <Screen {...props} />

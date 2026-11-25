@@ -1,10 +1,15 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Platform, StatusBar, Image, TextInput } from 'react-native';
+import React, { useCallback, useRef, useState } from 'react';
+import { Animated, View, Text, StyleSheet, TouchableOpacity, Platform, StatusBar, Image, TextInput, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
+import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ArrowLeft, HardHat, LogOut, Moon, Plus, Search, Sun, X } from 'lucide-react-native';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { resolveMediaUrl } from '../../utils/resolveMediaUrl';
+import { HeaderIconButton } from '../../components/AppHeader';
+import CreateListButton from '../../components/CreateListButton';
+import { requestLogoutConfirm } from '../../components/AuthPrompts';
+import { GlassBlur } from '../../components/GlassBg';
 
 export type Tone = 'info' | 'ok' | 'warn' | 'bad' | 'neutral';
 
@@ -46,8 +51,41 @@ export function useCardStyle() {
   } as const;
 }
 
-/** Topo no padrão do app: fundo transparente, logo da Gennesis (ou voltar + título nas telas internas). */
-export function EmpreiteiroHeader({ title, onBack }: { title: string; onBack?: () => void }) {
+/**
+ * Fundo de vidro do topo: transparente com o conteúdo no alto da página e vidro quando ele rola por baixo
+ * (igual ao topo das outras telas). Use `scrollProps` na lista e `headerHeight` como espaço no começo dela.
+ */
+export function useHeaderGlass() {
+  const glass = useRef(new Animated.Value(0)).current;
+  const on = useRef(false);
+  const [headerHeight, setHeaderHeight] = useState(Platform.OS === 'android' ? 96 : 110);
+  const onScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const next = e.nativeEvent.contentOffset.y > 6;
+      if (next === on.current) return;
+      on.current = next;
+      Animated.timing(glass, { toValue: next ? 1 : 0, duration: 180, useNativeDriver: true }).start();
+    },
+    [glass],
+  );
+  const onHeaderHeight = useCallback((h: number) => {
+    if (h > 0) setHeaderHeight((prev) => (Math.abs(prev - h) > 1 ? h : prev));
+  }, []);
+  return { glass, headerHeight, onHeaderHeight, scrollProps: { onScroll, scrollEventThrottle: 16 } };
+}
+
+/** Topo no padrão do app: transparente, vidro ao rolar, logo da Gennesis (ou voltar + título nas telas internas). */
+export function EmpreiteiroHeader({
+  title,
+  onBack,
+  glass,
+  onHeight,
+}: {
+  title: string;
+  onBack?: () => void;
+  glass?: Animated.Value;
+  onHeight?: (h: number) => void;
+}) {
   const { colors, toggleTheme, isDark } = useTheme();
   const { logout } = useAuth();
   const insets = useSafeAreaInsets();
@@ -55,16 +93,44 @@ export function EmpreiteiroHeader({ title, onBack }: { title: string; onBack?: (
     (Platform.OS === 'android' ? (insets.top > 0 ? insets.top : StatusBar.currentHeight ?? 24) : insets.top) +
     (Platform.OS === 'ios' ? 6 : 2);
   return (
-    <View style={[styles.header, { paddingTop: top }]}>
+    <View
+      style={[styles.header, styles.headerOverlay, { paddingTop: top }]}
+      onLayout={(e) => onHeight?.(e.nativeEvent.layout.height)}
+    >
+      {glass ? (
+        <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { opacity: glass }]}>
+          {Platform.OS === 'ios' ? (
+            <BlurView
+              intensity={55}
+              tint={isDark ? 'systemChromeMaterialDark' : 'systemChromeMaterialLight'}
+              style={StyleSheet.absoluteFill}
+            />
+          ) : (
+            <View
+              style={[StyleSheet.absoluteFill, { backgroundColor: isDark ? 'rgba(17,24,39,0.92)' : 'rgba(255,255,255,0.92)' }]}
+            />
+          )}
+          <View
+            style={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: StyleSheet.hairlineWidth,
+              backgroundColor: isDark ? 'rgba(255,255,255,0.14)' : 'rgba(15,23,42,0.14)',
+            }}
+          />
+        </Animated.View>
+      ) : null}
       <View style={styles.headerSide}>
         {onBack ? (
-          <TouchableOpacity onPress={onBack} hitSlop={8} accessibilityLabel="Voltar" style={styles.iconBtn}>
-            <ArrowLeft size={24} color={colors.text} strokeWidth={2.2} />
-          </TouchableOpacity>
+          <HeaderIconButton onPress={onBack} accessibilityLabel="Voltar">
+            <ArrowLeft size={22} color={colors.text} strokeWidth={2.2} />
+          </HeaderIconButton>
         ) : (
-          <TouchableOpacity onPress={toggleTheme} hitSlop={8} accessibilityLabel="Alternar tema" style={styles.iconBtn}>
+          <HeaderIconButton onPress={toggleTheme} accessibilityLabel="Alternar tema">
             {isDark ? <Sun size={22} color={colors.text} /> : <Moon size={22} color={colors.text} />}
-          </TouchableOpacity>
+          </HeaderIconButton>
         )}
       </View>
       <View style={styles.headerCenter} pointerEvents="none">
@@ -83,9 +149,9 @@ export function EmpreiteiroHeader({ title, onBack }: { title: string; onBack?: (
       </View>
       <View style={[styles.headerSide, { alignItems: 'flex-end' }]}>
         {!onBack ? (
-          <TouchableOpacity onPress={() => void logout()} hitSlop={8} accessibilityLabel="Sair" style={styles.iconBtn}>
+          <HeaderIconButton onPress={requestLogoutConfirm} accessibilityLabel="Sair">
             <LogOut size={22} color={colors.text} />
-          </TouchableOpacity>
+          </HeaderIconButton>
         ) : null}
       </View>
     </View>
@@ -218,56 +284,42 @@ export function Avatar({ uri, size = 64 }: { uri?: string | null; size?: number 
   );
 }
 
-/** Linha de busca + botão "+" vermelho, igual às listas do app (Reservas, Abastecimento...). */
+/** Linha de busca + botão "+" vermelho, no mesmo padrão das listas do app (Reservas, Abastecimento...). */
 export function ListToolbar({
   value,
   onChange,
-  placeholder,
   onAdd,
   addLabel,
 }: {
   value: string;
   onChange: (v: string) => void;
-  placeholder: string;
+  /** Mantido por compatibilidade; o campo usa sempre «Pesquisar», como as outras listas. */
+  placeholder?: string;
   onAdd: () => void;
   addLabel: string;
 }) {
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
   return (
     <View style={styles.toolbar}>
-      <View
-        style={[
-          styles.searchBox,
-          {
-            backgroundColor: isDark ? colors.card : colors.surface,
-            borderColor: isDark ? 'transparent' : 'rgba(15, 23, 42, 0.08)',
-          },
-        ]}
-      >
+      <View style={styles.searchBox}>
+        <GlassBlur white radius={22} />
         <Search size={16} color={colors.textSecondary} strokeWidth={2} />
         <TextInput
           style={[styles.searchInput, { color: colors.text }]}
-          placeholder={placeholder}
+          placeholder="Pesquisar"
           placeholderTextColor={colors.textSecondary}
           value={value}
           onChangeText={onChange}
           returnKeyType="search"
+          autoCorrect={false}
         />
         {value.length > 0 ? (
-          <TouchableOpacity onPress={() => onChange('')} hitSlop={8}>
+          <TouchableOpacity onPress={() => onChange('')} hitSlop={8} accessibilityLabel="Limpar busca">
             <X size={16} color={colors.textSecondary} />
           </TouchableOpacity>
         ) : null}
       </View>
-      <TouchableOpacity
-        style={[styles.addBtn, { backgroundColor: colors.primary }]}
-        onPress={onAdd}
-        activeOpacity={0.85}
-        accessibilityRole="button"
-        accessibilityLabel={addLabel}
-      >
-        <Plus size={22} color="#fff" strokeWidth={2.5} />
-      </TouchableOpacity>
+      <CreateListButton onPress={onAdd} accessibilityLabel={addLabel} />
     </View>
   );
 }
@@ -377,6 +429,7 @@ const styles = StyleSheet.create({
   badge: { alignSelf: 'flex-start', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3 },
   badgeText: { fontSize: 11, fontWeight: '700' },
   header: { flexDirection: 'row', alignItems: 'center', paddingBottom: 12, paddingHorizontal: 14, minHeight: 52 },
+  headerOverlay: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 20 },
   headerSide: { width: 48, justifyContent: 'center' },
   headerCenter: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
   iconBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
@@ -400,19 +453,17 @@ const styles = StyleSheet.create({
   progressValue: { fontSize: 13, fontWeight: '800' },
   progressTrack: { height: 6, borderRadius: 3, marginTop: 6, marginHorizontal: 4, overflow: 'hidden' },
   progressFill: { height: 6, borderRadius: 3 },
-  toolbar: { flexDirection: 'row', alignItems: 'stretch', gap: 10, marginTop: 16, marginBottom: 16 },
+  toolbar: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 16, marginBottom: 16 },
   searchBox: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    borderRadius: 14,
+    gap: 8,
+    borderRadius: 22,
     paddingHorizontal: 14,
-    minHeight: 48,
-    borderWidth: StyleSheet.hairlineWidth * 1.5,
+    minHeight: 44,
   },
   searchInput: { flex: 1, paddingVertical: Platform.OS === 'ios' ? 12 : 8, fontSize: 15 },
-  addBtn: { width: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center', alignSelf: 'stretch' },
   listHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
   listHeading: { fontSize: 17, fontWeight: '700', letterSpacing: -0.3 },
   listCount: { fontSize: 13, fontWeight: '700' },

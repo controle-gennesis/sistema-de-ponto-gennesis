@@ -15,6 +15,7 @@ import {
   View,
 } from 'react-native';
 import { ArrowLeft, X, type LucideIcon } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../context/ThemeContext';
 
 const BRAND = '#ce3736';
@@ -67,6 +68,8 @@ export default function SheetModal({
   children,
 }: Props) {
   const { isDark } = useTheme();
+  const safeBottom = useSafeAreaInsets().bottom;
+  const androidNavInset = Platform.OS === 'android' ? safeBottom : 0;
   const C = useMemo(
     () => ({
       sheet: isDark ? '#111827' : '#ffffff',
@@ -153,7 +156,8 @@ export default function SheetModal({
     keyboardInset.setValue(0);
   }, [visible, keyboardInset]);
 
-  const bottom = bottomPad ?? SHEET_BOTTOM_PAD;
+  // Android: a barra de navegação (3 botões/gestos) fica por cima da folha; sobra espaço pra ela (só quando a folha não está embutida em outro Modal).
+  const bottom = (bottomPad ?? SHEET_BOTTOM_PAD) + (embedded ? 0 : androidNavInset);
   const sheetSize =
     size === 'tall'
       ? { height: Math.round(windowHeight * 0.92) }
@@ -233,6 +237,7 @@ export default function SheetModal({
       transparent
       animationType="none"
       statusBarTranslucent
+      navigationBarTranslucent
       onRequestClose={onClose}
     >
       {body}

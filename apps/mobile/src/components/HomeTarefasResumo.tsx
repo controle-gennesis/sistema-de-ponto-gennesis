@@ -21,8 +21,8 @@ function startOfDay(d: Date): number {
  */
 export default function HomeTarefasResumo() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { colors } = useTheme();
-  const styles = useMemo(() => getStyles(colors), [colors]);
+  const { colors, isDark } = useTheme();
+  const styles = useMemo(() => getStyles(colors, isDark), [colors, isDark]);
 
   const { data: lists = [] } = useQuery({
     queryKey: ['planner-task-lists'],
@@ -67,7 +67,9 @@ export default function HomeTarefasResumo() {
       </View>
 
       <View style={styles.grid}>
-        {cards.map(({ key, label, value, Icon }) => (
+        {[cards.slice(0, 2), cards.slice(2, 4)].map((par, i) => (
+        <View key={i} style={styles.gridRow}>
+        {par.map(({ key, label, value, Icon }) => (
           <Pressable
             key={key}
             // Sem «apagar» o cartão ao tocar: o toque deixava o cartão no estado apertado (mais vermelho)
@@ -91,6 +93,8 @@ export default function HomeTarefasResumo() {
             </View>
           </Pressable>
         ))}
+        </View>
+        ))}
       </View>
 
       <View style={styles.footer}>
@@ -110,10 +114,12 @@ export default function HomeTarefasResumo() {
   );
 }
 
-function getStyles(colors: any) {
+function getStyles(colors: any, isDark: boolean) {
   return StyleSheet.create({
     block: {
-      backgroundColor: colors.primary,
+      // Escuro: bloco no cinza do tema (como os outros cartões); claro: vermelho da marca.
+      backgroundColor: isDark ? colors.card : colors.primary,
+      ...(isDark ? { borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.08)' } : null),
       borderRadius: 26,
       padding: 16,
       marginBottom: 16,
@@ -146,23 +152,26 @@ function getStyles(colors: any) {
     footerTitle: { fontSize: 15, fontWeight: '600', color: '#fff', letterSpacing: -0.2 },
     footerLinkRow: { flexDirection: 'row', alignItems: 'center', gap: 1 },
     footerLink: { fontSize: 13, fontWeight: '600', color: 'rgba(255,255,255,0.85)' },
-    grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+    // Duas linhas de dois cartões com flex:1 (em % + gap, telas de ~360dp estouravam e quebravam em 1 por linha).
+    grid: { gap: 10 },
+    gridRow: { flexDirection: 'row', gap: 10 },
     card: {
-      width: '48.4%',
+      flex: 1,
+      minWidth: 0,
       minHeight: 164,
       borderRadius: 20,
       padding: 14,
       justifyContent: 'space-between',
-      backgroundColor: 'rgba(255,255,255,0.18)',
+      backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.18)',
       borderWidth: StyleSheet.hairlineWidth,
-      borderColor: 'rgba(255,255,255,0.28)',
+      borderColor: isDark ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.28)',
     },
     cardTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
     iconCircle: {
       width: 38,
       height: 38,
       borderRadius: 12,
-      backgroundColor: '#fff',
+      backgroundColor: isDark ? 'rgba(206,55,54,0.2)' : '#fff',
       alignItems: 'center',
       justifyContent: 'center',
     },

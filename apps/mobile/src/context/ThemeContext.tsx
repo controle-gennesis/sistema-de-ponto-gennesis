@@ -138,6 +138,27 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 };
 
+/**
+ * Força o tema claro dentro de uma parte do app (ex.: tela de Início), mesmo que a pessoa tenha escolhido o
+ * escuro. O resto do app continua seguindo a escolha dela.
+ */
+export function withLightTheme<P extends object>(Screen: React.ComponentType<P>) {
+  function Light(props: P) {
+    const base = useContext(ThemeContext);
+    const value = useMemo<ThemeContextData>(
+      () => ({ ...base, theme: 'light', colors: lightColors, isDark: false }),
+      [base],
+    );
+    return (
+      <ThemeContext.Provider value={value}>
+        <Screen {...props} />
+      </ThemeContext.Provider>
+    );
+  }
+  Light.displayName = `Light(${Screen.displayName ?? Screen.name ?? 'Screen'})`;
+  return Light;
+}
+
 export const useTheme = () => {
   const context = useContext(ThemeContext);
   if (!context) {

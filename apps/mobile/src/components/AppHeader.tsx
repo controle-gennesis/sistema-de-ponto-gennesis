@@ -51,7 +51,8 @@ export function HeaderIconButton({
       activeOpacity={0.7}
     >
       {/* Fundo em círculo, separado do conteúdo para a bolinha de notificações poder sair dele. */}
-      <GlassBlur radius={22} />
+      {/* Android: só o ícone, sem fundo. */}
+      {Platform.OS === 'ios' ? <GlassBlur radius={22} /> : null}
       {children}
     </TouchableOpacity>
   );
@@ -267,10 +268,11 @@ const styles = StyleSheet.create({
   glassShadow: {
     borderRadius: 22,
     shadowColor: '#000',
-    shadowOpacity: 0.07,
+    // Android: sem sombra nos botões do topo.
+    shadowOpacity: Platform.OS === 'android' ? 0 : 0.07,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
+    elevation: 0,
   },
   glassBg: {
     borderRadius: 22,

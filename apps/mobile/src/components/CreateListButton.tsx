@@ -15,16 +15,25 @@ import {
  * que o botão flutuante disparava, então cada tela continua abrindo o seu formulário/menu.
  * Redondo, na altura da busca: fundo vermelho com "+" branco; no iOS 26 o vidro nativo vai por cima.
  */
-export default function CreateListButton({ tab }: { tab: FabBarTabName }) {
+export default function CreateListButton({
+  tab,
+  onPress,
+  accessibilityLabel = 'Novo',
+}: {
+  tab?: FabBarTabName;
+  /** Quando a tela abre o próprio formulário (em vez do evento da barra de abas). */
+  onPress?: () => void;
+  accessibilityLabel?: string;
+}) {
   const { colors } = useTheme();
   return (
     <TouchableOpacity
       style={[styles.btn, { backgroundColor: colors.primary }]}
-      onPress={() => emitFabBarPress(tab)}
-      onLongPress={() => emitFabBarLongPress(tab)}
+      onPress={() => (onPress ? onPress() : tab ? emitFabBarPress(tab) : undefined)}
+      onLongPress={tab && !onPress ? () => emitFabBarLongPress(tab) : undefined}
       activeOpacity={0.85}
       accessibilityRole="button"
-      accessibilityLabel="Novo"
+      accessibilityLabel={accessibilityLabel}
     >
       {LIQUID_GLASS ? (
         <View style={StyleSheet.absoluteFill}>
