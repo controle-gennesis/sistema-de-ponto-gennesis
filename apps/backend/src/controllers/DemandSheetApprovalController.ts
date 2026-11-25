@@ -1600,6 +1600,13 @@ export class DemandSheetApprovalController {
                   },
                 };
 
+      if (String(req.query.countOnly ?? '') === '1') {
+        const count = await prisma.demandSheetApproval.count({
+          where: { ...phaseFilter, ...managerScope },
+        });
+        return res.json({ success: true, count });
+      }
+
       const rows = await prisma.demandSheetApproval.findMany({
         where: { ...phaseFilter, ...managerScope },
         include: includeDefault,

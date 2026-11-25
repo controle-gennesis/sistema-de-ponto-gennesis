@@ -1079,7 +1079,7 @@ export class DpRequestController {
 
       const visibility = await getDpManagerApprovalVisibilityWhere(req.user.id, req.user.isAdmin);
       if (visibility === null) {
-        return res.json({ success: true, data: [] });
+        return res.json({ success: true, data: [], count: 0 });
       }
 
       const rawPhase = String(req.query.phase ?? 'PENDING').toUpperCase();
@@ -1105,10 +1105,17 @@ export class DpRequestController {
                   ],
                 };
 
+      const phaseWhere: Prisma.DpRequestWhereInput = {
+        AND: [phaseFilter, visibility as Prisma.DpRequestWhereInput, admTstManagerApprovalExclusionWhere()],
+      };
+      // Só a contagem (cartões da tela): não baixa nem monta as linhas.
+      if (String(req.query.countOnly ?? '') === '1') {
+        const count = await prisma.dpRequest.count({ where: phaseWhere });
+        return res.json({ success: true, count });
+      }
+
       const requests = await prisma.dpRequest.findMany({
-        where: {
-          AND: [phaseFilter, visibility as Prisma.DpRequestWhereInput, admTstManagerApprovalExclusionWhere()],
-        },
+        where: phaseWhere,
         include: {
           employee: {
             select: {

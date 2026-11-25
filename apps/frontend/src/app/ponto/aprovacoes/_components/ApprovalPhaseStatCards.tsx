@@ -91,9 +91,10 @@ export async function fetchApprovalPhaseCounts<T extends string>(
 ): Promise<Record<T, number>> {
   const results = await Promise.all(
     phases.map(async (phase) => {
-      const res = await api.get(url, { params: { phase } });
+      const res = await api.get(url, { params: { phase, countOnly: 1 } });
       const data = res.data?.data;
-      const count = Array.isArray(data) ? data.length : 0;
+      const apiCount = Number(res.data?.count);
+      const count = Number.isFinite(apiCount) ? apiCount : Array.isArray(data) ? data.length : 0;
       return [phase, count] as const;
     }),
   );

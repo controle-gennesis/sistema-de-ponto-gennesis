@@ -638,7 +638,7 @@ export class FuelRefuelRequestController {
 
       const scope = await getManagerFuelApprovalContractScope(user.id, user.isAdmin);
       if (scope === null) {
-        return res.json({ success: true, data: [] });
+        return res.json({ success: true, data: [], count: 0 });
       }
 
       const rawPhase = String(req.query.phase ?? 'PENDING').toUpperCase();
@@ -648,6 +648,15 @@ export class FuelRefuelRequestController {
       )
         ? (rawPhase as Phase)
         : 'PENDING';
+
+      if (String(req.query.countOnly ?? '') === '1') {
+        const count = await fuelRefuelRequestService.listForManagerApprovals({
+          phase,
+          contractScope: mapManagerScopeToFuelWhere(scope),
+          countOnly: true,
+        });
+        return res.json({ success: true, count });
+      }
 
       const rows = await fuelRefuelRequestService.listForManagerApprovals({
         phase,

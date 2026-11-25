@@ -844,6 +844,7 @@ export class FuelRefuelRequestService {
   async listForManagerApprovals(params: {
     phase: 'PENDING' | 'APPROVED' | 'REJECTED' | 'ALL';
     contractScope: Prisma.FuelRefuelRequestWhereInput;
+    countOnly?: boolean;
   }) {
     const phaseFilter: Prisma.FuelRefuelRequestWhereInput =
       params.phase === 'PENDING'
@@ -885,6 +886,10 @@ export class FuelRefuelRequestService {
                   { status: FuelRefuelRequestStatus.CANCELLED },
                 ],
               };
+
+    if (params.countOnly) {
+      return prisma.fuelRefuelRequest.count({ where: { ...phaseFilter, ...params.contractScope } });
+    }
 
     const rows = await prisma.fuelRefuelRequest.findMany({
       where: { ...phaseFilter, ...params.contractScope },
