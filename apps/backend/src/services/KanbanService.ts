@@ -2323,10 +2323,30 @@ export class KanbanService {
       totalTasks,
     );
     const targetColumnId = data.columnId ?? existing.columnId;
+    // Marcar como concluído (sem mover de coluna) manda o card para o fim da fila;
+    // desmarcar devolve ao lugar de onde ele saiu.
+    const sameColumn = targetColumnId === existing.columnId;
+    const markedDone =
+      data.completedAt !== undefined && !!completedAt && !existing.completedAt && sameColumn;
+    const unmarkedDone =
+      data.completedAt !== undefined && completedAt === null && !!existing.completedAt && sameColumn;
+    // undefined = não mexe no valor guardado.
+    let positionBeforeDone: number | null | undefined;
+    if (markedDone) {
+      positionBeforeDone = await prisma.kanbanCard.count({
+        where: { columnId: existing.columnId, position: { lt: existing.position } },
+      });
+    } else if (unmarkedDone || !sameColumn) {
+      positionBeforeDone = null;
+    }
     const requestedPosition =
       data.position != null && Number.isFinite(data.position)
         ? Math.max(0, Math.trunc(data.position))
-        : undefined;
+        : markedDone
+          ? Number.MAX_SAFE_INTEGER // a reordenação limita à última posição
+          : unmarkedDone && existing.positionBeforeDone != null
+            ? existing.positionBeforeDone
+            : undefined;
     const hasOrderChange =
       targetColumnId !== existing.columnId || requestedPosition !== undefined;
 
@@ -2356,6 +2376,7 @@ export class KanbanService {
         ? { attachmentsEnabled: data.attachmentsEnabled }
         : {}),
       ...(completedAt !== undefined ? { completedAt } : {}),
+      ...(positionBeforeDone !== undefined ? { positionBeforeDone } : {}),
       ...(archivedAt !== undefined ? { archivedAt } : {}),
       ...(data.workHours !== undefined
         ? { workHours: data.workHours == null ? null : data.workHours }

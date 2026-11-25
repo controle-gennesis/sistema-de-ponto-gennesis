@@ -3772,6 +3772,8 @@ model KanbanCard {
   coverColor         String?
   /// NORMAL = faixa no topo; FULL = cartão inteiro colorido.
   coverSize          String       @default("NORMAL")
+  /// Lugar na coluna antes de ser concluído; usado para voltar ao desmarcar.
+  positionBeforeDone Int?
   createdAt          DateTime     @default(now())
   updatedAt          DateTime     @updatedAt
 

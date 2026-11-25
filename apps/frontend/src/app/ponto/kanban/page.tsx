@@ -3618,16 +3618,28 @@ function KanbanPage() {
       if (boardReadOnly || isOptimisticKanbanCardId(card.id)) return;
       const nextCompletedAt = card.completedAt ? null : new Date().toISOString();
       const previousCompletedAt = card.completedAt ?? null;
+      const previousBoard = queryClient.getQueryData<KanbanBoard>(kanbanBoardQueryKey);
       queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) => {
         if (!old) return old;
         return {
           ...old,
-          columns: old.columns.map((col) => ({
-            ...col,
-            cards: col.cards.map((c) =>
+          columns: old.columns.map((col) => {
+            if (!col.cards.some((c) => c.id === card.id)) return col;
+            const cards = col.cards.map((c) =>
               c.id === card.id ? { ...c, completedAt: nextCompletedAt } : c,
-            ),
-          })),
+            );
+            // Concluído vai para o fim da fila (o servidor grava a mesma ordem).
+            if (nextCompletedAt) {
+              return {
+                ...col,
+                cards: [
+                  ...cards.filter((c) => c.id !== card.id),
+                  ...cards.filter((c) => c.id === card.id),
+                ],
+              };
+            }
+            return { ...col, cards };
+          }),
         };
       });
       try {
@@ -3646,8 +3658,13 @@ function KanbanPage() {
             })),
           };
         });
+        // Ao desmarcar, o lugar de volta é decidido pelo servidor: recarrega a ordem.
+        if (!nextCompletedAt) {
+          void queryClient.invalidateQueries({ queryKey: kanbanBoardQueryKey });
+        }
       } catch {
         queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) => {
+          if (previousBoard) return previousBoard;
           if (!old) return old;
           return {
             ...old,
