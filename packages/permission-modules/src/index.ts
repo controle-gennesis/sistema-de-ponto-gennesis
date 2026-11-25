@@ -143,8 +143,7 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   // Engenharia
   { key: pathToModuleKey('/ponto/orcamento'), name: 'Orçamentos', href: '/ponto/orcamentos', category: 'Engenharia' },
   { key: pathToModuleKey('/ponto/contratos'), name: 'Contratos', href: '/ponto/contratos', category: 'Engenharia' },
-  { key: pathToModuleKey('/ponto/empreiteiros'), name: 'Empreitas', href: '/ponto/empreiteiros', category: 'Engenharia' },
-  { key: pathToModuleKey('/ponto/relatorios-fotograficos'), name: 'Relatórios Fotográficos', href: '/ponto/relatorios-fotograficos', category: 'Engenharia' },
+    { key: pathToModuleKey('/ponto/relatorios-fotograficos'), name: 'Relatórios Fotográficos', href: '/ponto/relatorios-fotograficos', category: 'Engenharia' },
   { key: pathToModuleKey('/ponto/contratos/controle-geral'), name: 'Controle Geral de Contratos', href: '/ponto/contratos/controle-geral', category: 'Métricas' },
   { key: pathToModuleKey('/ponto/contratos/socios'), name: 'Contratos Sócios', href: '/ponto/contratos/socios', category: 'Métricas' },
   { key: pathToModuleKey('/ponto/contratos/gastos-operacionais'), name: 'Gastos Operacionais', href: '/ponto/contratos/gastos-operacionais', category: 'Métricas' },
@@ -241,6 +240,7 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
     href: '/ponto/juridico/solicitacoes-fluig',
     category: 'Jurídico',
   },
+  { key: pathToModuleKey('/ponto/empreiteiros'), name: 'Empreitas', href: '/ponto/empreiteiros', category: 'Jurídico' },
   // Suprimentos
   { key: pathToModuleKey('/ponto/gerenciar-materiais'), name: 'Requisições de Materiais', href: '/ponto/gerenciar-materiais', category: 'Suprimentos' },
   { key: pathToModuleKey('/ponto/mapa-cotacao'), name: 'Mapa de Cotação', href: '/ponto/mapa-cotacao', category: 'Suprimentos' },

@@ -84,6 +84,7 @@ type BoletoStatus = 'PAGO' | 'A_VENCER' | 'VENCIDO';
 
 type BoletoEntry = {
   id: string;
+  displayNumber: number;
   polo: string | null;
   supplierName: string | null;
   costCenterName: string | null;
@@ -738,11 +739,12 @@ function ControleBoletosPage() {
                 <table className={cadastroListClasses.table}>
                   <thead className="border-b border-gray-200 dark:border-gray-700">
                     <tr>
+                      <th className={th}>ID</th>
                       <th className={th}>Polo</th>
                       <th className={thLeft}>Fornecedor</th>
                       <th className={th}>Centro de custo</th>
                       <th className={th}>OC</th>
-                      <th className={th}>ID</th>
+                      <th className={th}>ID Mov.</th>
                       <th className={thRight}>Valor</th>
                       <th className={th}>Nº NF</th>
                       <th className={th}>Emissão NF</th>
@@ -758,6 +760,7 @@ function ControleBoletosPage() {
                   <tbody className="divide-y divide-gray-100 dark:divide-gray-700/80">
                     {rows.map((r) => (
                       <tr key={r.id} className={getListTableRowClassName(true)} onClick={() => openEdit(r)}>
+                        <td className={`${td} font-mono`}>{r.displayNumber}</td>
                         <td className={td}>{r.polo || '—'}</td>
                         <td className="max-w-[210px] truncate px-2 py-3 text-xs font-medium text-gray-900 dark:text-gray-100" title={r.supplierName ?? ''}>
                           {r.supplierName || '—'}

@@ -3201,6 +3201,7 @@ model UserContractPermission {
   accessFluig               Boolean  @default(false)
   /// Aba Obras do contrato (lista de obras e Diários de Obra).
   accessObras               Boolean  @default(false)
+  accessEmpreiteiros        Boolean  @default(false)
   /// Comprador: vê as RMs e OCs deste contrato só no Mapa de Cotação, sem precisar do Liberado
   /// (não abre a ficha do contrato e não aparece nas pessoas do contrato).
   accessComprador           Boolean  @default(false)
@@ -6200,6 +6201,8 @@ model BoletoControlEntry {
   technicalConfirmedByName String?
   /// Chave da linha na importação (evita duplicar ao importar a mesma planilha de novo)
   importKey                String?   @unique
+  /// Número sequencial fixo do boleto (ID da lista).
+  displayNumber            Int       @unique @default(autoincrement())
   createdAt                DateTime  @default(now())
   updatedAt                DateTime  @updatedAt
   createdBy                String?

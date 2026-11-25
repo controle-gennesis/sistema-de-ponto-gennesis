@@ -299,6 +299,9 @@ export function AditivoApprovalsSection() {
                 <table className="w-full text-sm">
                   <thead className="border-b border-gray-200 dark:border-gray-700">
                     <tr>
+                      <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                        ID
+                      </th>
                       {['Empreita', 'Serviço', 'Aditivo', 'Data', 'Valor', APPROVAL_STATUS_COLUMN_TITLE, 'Ação'].map(
                         (label) => (
                           <th
@@ -322,6 +325,9 @@ export function AditivoApprovalsSection() {
                         className={getListTableRowClassName(true)}
                         onClick={() => openDetail(item)}
                       >
+                        <td className="whitespace-nowrap px-3 py-3 text-center align-middle text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100 sm:px-6">
+                          {item.number ?? '—'}
+                        </td>
                         <td className="px-3 py-3 align-middle text-sm sm:px-6">
                           <ListRowNavigableLabel className="font-medium">
                             {item.empreiteiro?.name || '—'}

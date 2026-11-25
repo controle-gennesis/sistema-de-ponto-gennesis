@@ -59,6 +59,7 @@ function managerOf(map: Map<string, string>, costCenterName: string | null): str
 function serialize(e: EntryRow, today: Date, managers: Map<string, string>) {
   return {
     id: e.id,
+    displayNumber: e.displayNumber,
     polo: e.polo,
     supplierName: e.supplierName,
     costCenterName: e.costCenterName,
@@ -137,6 +138,7 @@ function baseWhere(f: Filters, managers: Map<string, string>): Prisma.BoletoCont
         { supplierName: contains },
         { ocNumber: contains },
         { idMov: contains },
+        ...(/^\d{1,9}$/.test(f.search.trim()) ? [{ displayNumber: Number(f.search.trim()) }] : []),
         { nfNumber: contains },
         { costCenterName: contains },
         { notes: contains },

@@ -44,6 +44,7 @@ import {
   notifyRequesterApprovedWhatsApp,
   notifyRequesterCancelledWhatsApp,
 } from '../lib/approvalWhatsAppNotify';
+import { notifyManagersNewDpRequest } from '../lib/dpRequestMessages';
 
 const DP_REQUEST_TYPES = [
   'ADMISSAO',
@@ -929,6 +930,11 @@ export class DpRequestController {
         );
       }
 
+      // Pedido administrativo já nasce na fila de quem gerencia: avisa essa equipe.
+      if (initialStatus === 'PENDING_DP') {
+        notifyManagersNewDpRequest(created as never, actorUserId);
+      }
+
       return res.status(201).json({ success: true, data: created });
     } catch (e: unknown) {
       if (e instanceof z.ZodError) {
@@ -1219,6 +1225,9 @@ export class DpRequestController {
           true
         );
       }
+
+      // Aprovada pelo gestor: a solicitação entra na fila de quem gerencia.
+      notifyManagersNewDpRequest(updated as never, req.user.id);
 
       return res.json({ success: true, data: updated });
     } catch (e: unknown) {
