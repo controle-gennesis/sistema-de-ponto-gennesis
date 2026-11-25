@@ -777,7 +777,10 @@ export default function EmpreiteirosPage() {
     );
   };
 
-  /** Ao editar uma parcela, redistribui o restante do planejado nas outras. */
+  /**
+   * Ao editar uma parcela, redistribui o restante do planejado só nas parcelas SEGUINTES.
+   * As anteriores (já ajustadas) ficam como estão; a última parcela não redistribui nada.
+   */
   const redistributeParcelAmounts = (
     current: string[],
     editedIndex: number,
@@ -790,13 +793,17 @@ export default function EmpreiteirosPage() {
     next[editedIndex] = maskCurrencyInputBrOrEmpty(rawValue);
     if (!(plannedTotal != null && plannedTotal > 0) || count === 1) return next;
 
-    const edited = parseCurrencyInputBr(next[editedIndex]) || 0;
-    const others = count - 1;
-    const remainingCents = Math.max(0, Math.round(plannedTotal * 100) - Math.round(edited * 100));
-    const base = Math.floor(remainingCents / others);
-    let leftover = remainingCents - base * others;
-    for (let i = 0; i < count; i += 1) {
-      if (i === editedIndex) continue;
+    const later = count - editedIndex - 1;
+    if (later < 1) return next;
+
+    let fixedCents = 0;
+    for (let i = 0; i <= editedIndex; i += 1) {
+      fixedCents += Math.round((parseCurrencyInputBr(next[i]) || 0) * 100);
+    }
+    const remainingCents = Math.max(0, Math.round(plannedTotal * 100) - fixedCents);
+    const base = Math.floor(remainingCents / later);
+    let leftover = remainingCents - base * later;
+    for (let i = editedIndex + 1; i < count; i += 1) {
       const extra = leftover > 0 ? 1 : 0;
       if (leftover > 0) leftover -= 1;
       next[i] = formatCurrencyInputBrFromNumber((base + extra) / 100);
@@ -4137,6 +4144,16 @@ export default function EmpreiteirosPage() {
                                   icon: <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />,
                                   onClick: () => window.open(resolveApiMediaUrl(pf.url) || pf.url, '_blank', 'noopener,noreferrer'),
                                 })),
+                                // Parcela ainda sem solicitação: o menu não pode abrir vazio.
+                                ...(canManageCadastro && !parcelMenuRow.parcel.fluigRequestNumber
+                                  ? [
+                                      {
+                                        label: 'Informar solicitação do Fluig',
+                                        icon: <Link2 className="h-4 w-4 shrink-0" />,
+                                        onClick: () => abrirModalFluig(link.id, parcelMenuRow.parcel),
+                                      },
+                                    ]
+                                  : []),
                                 // O comprovante fica na própria solicitação do Fluig (link na coluna Fluig).
                                 ...(canManageCadastro && parcelMenuRow.parcel.fluigRequestNumber
                                   ? [
