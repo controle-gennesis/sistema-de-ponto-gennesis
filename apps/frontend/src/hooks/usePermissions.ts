@@ -180,6 +180,7 @@ export function usePermissions() {
     resumo: boolean;
     fluig?: boolean;
     obras?: boolean;
+    empreiteiros?: boolean;
     comprador?: boolean;
   };
   const contractModuleFlags: Record<string, ContractModuleFlagRow> =
@@ -596,6 +597,12 @@ export function usePermissions() {
     return canAccessContract(contractId) && contractModuleFlags[contractId]?.fluig === true;
   };
 
+  /** Aba «Empreiteiros» do contrato: coluna própria na matriz de contratos. */
+  const canAccessContractEmpreiteirosTab = (contractId: string) => {
+    if (isElevatedUser) return true;
+    return canAccessContract(contractId) && contractModuleFlags[contractId]?.empreiteiros === true;
+  };
+
   const canAccessContractObrasTab = (contractId: string) => {
     if (isElevatedUser) return true;
     return canAccessContract(contractId) && contractModuleFlags[contractId]?.obras === true;
@@ -714,6 +721,7 @@ export function usePermissions() {
     canAccessContractPleitosTab,
     canAccessContractFaturamentoTab,
     canAccessContractFluigTab,
+    canAccessContractEmpreiteirosTab,
     canAccessContractObrasTab,
     canAccessContractResumoTab,
     isContractGestor,

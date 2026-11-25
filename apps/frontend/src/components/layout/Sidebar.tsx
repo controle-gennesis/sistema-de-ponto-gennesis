@@ -1331,14 +1331,6 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             section: 'Obras'
           },
           {
-            name: 'Empreitas',
-            href: '/ponto/empreiteiros',
-            icon: HardHat,
-            description: 'Cadastro de empreitas da obra',
-            permission: isAdministrator || can(pk('/ponto/empreiteiros')) || isLinkedEmpreiteiro,
-            section: 'Obras'
-          },
-          {
             name: 'Ordem de Serviço',
             href: '/ponto/andamento-da-os',
             icon: ClipboardList,
@@ -1500,6 +1492,13 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             icon: Workflow,
             description: 'Solicitações do Jurídico no Fluig',
             permission: isAdministrator || can(pk('/ponto/juridico/solicitacoes-fluig')),
+          },
+          {
+            name: 'Empreitas',
+            href: '/ponto/empreiteiros',
+            icon: HardHat,
+            description: 'Cadastro de empreitas da obra',
+            permission: isAdministrator || can(pk('/ponto/empreiteiros')) || isLinkedEmpreiteiro,
           },
         ]
       },

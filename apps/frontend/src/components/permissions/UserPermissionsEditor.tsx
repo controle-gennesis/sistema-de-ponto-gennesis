@@ -69,6 +69,8 @@ type ContractModuleFlags = {
   resumo: boolean;
   fluig: boolean;
   obras: boolean;
+  /** Aba «Empreiteiros» do contrato. */
+  empreiteiros: boolean;
   /** Comprador: vê as RMs e OCs do contrato só no Mapa de Cotação, sem precisar do Liberado. */
   comprador: boolean;
 };
@@ -82,6 +84,7 @@ const emptyContractModuleFlags = (): ContractModuleFlags => ({
   resumo: false,
   fluig: false,
   obras: false,
+  empreiteiros: false,
   comprador: false,
 });
 
@@ -200,7 +203,7 @@ function serializeModuleFlags(flags: Record<string, ContractModuleFlags>): strin
     .sort()
     .map((id) => {
       const f = flags[id];
-      return `${id}:${f.orcamento ? 1 : 0}${f.ordemServico ? 1 : 0}${f.producaoSemanal ? 1 : 0}${f.pleitos ? 1 : 0}${f.faturamento ? 1 : 0}${f.resumo ? 1 : 0}${f.fluig ? 1 : 0}${f.obras ? 1 : 0}${f.comprador ? 1 : 0}`;
+      return `${id}:${f.orcamento ? 1 : 0}${f.ordemServico ? 1 : 0}${f.producaoSemanal ? 1 : 0}${f.pleitos ? 1 : 0}${f.faturamento ? 1 : 0}${f.resumo ? 1 : 0}${f.fluig ? 1 : 0}${f.obras ? 1 : 0}${f.empreiteiros ? 1 : 0}${f.comprador ? 1 : 0}`;
     })
     .join(',');
 }
@@ -1675,6 +1678,7 @@ export function UserPermissionsEditor({
         !nextFlags.resumo &&
         !nextFlags.fluig &&
         !nextFlags.obras &&
+        !nextFlags.empreiteiros &&
         !nextFlags.comprador
       ) {
         const next = { ...prev };
@@ -2598,7 +2602,7 @@ export function UserPermissionsEditor({
                           </div>
                           <div>
                             <dt className="font-semibold text-gray-900 dark:text-gray-100">
-                              Resumo, Obras, Prod. Sem., O.S., Pleitos, Faturamento e Fluig
+                              Resumo, Obras, Prod. Sem., O.S., Pleitos, Faturamento, Empreiteiros e Fluig
                             </dt>
                             <dd className="text-gray-600 dark:text-gray-300">
                               Cada uma libera a aba correspondente dentro do contrato.
@@ -2620,7 +2624,7 @@ export function UserPermissionsEditor({
             ) : (
               <div>
                 <div className="overflow-x-auto overscroll-x-contain">
-                  <table className="w-full min-w-[860px] text-sm">
+                  <table className="w-full min-w-[920px] text-sm">
                     <thead>
                       <tr className="border-b border-gray-100 align-bottom dark:border-gray-700/80">
                         <th
@@ -2690,6 +2694,13 @@ export function UserPermissionsEditor({
                           title="Acesso à aba Obras neste contrato"
                         >
                           Obras
+                        </th>
+                        <th
+                          scope="col"
+                          className="px-1 pb-3 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400 dark:text-gray-500"
+                          title="Acesso à aba Empreiteiros neste contrato"
+                        >
+                          Empreit.
                         </th>
                         <th
                           scope="col"
@@ -2845,6 +2856,15 @@ export function UserPermissionsEditor({
                                   checked={flags.obras}
                                   onCheckedChange={(next) => setContractModuleFlag(c.id, 'obras', next)}
                                   aria-label={`Obras — ${c.name}`}
+                                />
+                              </div>
+                            </td>
+                            <td className="px-1 py-3.5 text-center align-middle">
+                              <div className="flex justify-center">
+                                <PermissionMatrixCheckbox
+                                  checked={flags.empreiteiros === true}
+                                  onCheckedChange={(next) => setContractModuleFlag(c.id, 'empreiteiros', next)}
+                                  aria-label={`Empreiteiros — ${c.name}`}
                                 />
                               </div>
                             </td>

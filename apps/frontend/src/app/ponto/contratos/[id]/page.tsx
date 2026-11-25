@@ -45,6 +45,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { Modal } from '@/components/ui/Modal';
 import { ContratoObrasTab } from './ContratoObrasTab';
+import { ContratoEmpreiteirosTab } from './ContratoEmpreiteirosTab';
 import { NotificationCountBadge } from '@/components/ui/NotificationCountBadge';
 import { ContratoAcompanhamentoListPage } from '@/components/contract/ContratoAcompanhamentoListPage';
 import type { ContratoVisaoGeral } from '@/components/contract/ContratoResumoVisaoGeral';
@@ -1086,6 +1087,7 @@ export default function ContractDetailPage() {
     canAccessContractPleitosTab,
     canAccessContractFaturamentoTab,
     canAccessContractFluigTab,
+    canAccessContractEmpreiteirosTab,
     canAccessContractObrasTab,
     canAccessContractResumoTab,
     isContractGestor,
@@ -1111,6 +1113,8 @@ export default function ContractDetailPage() {
   const canAccessResumoModulo = canAccessContractResumoTab(contractId);
   /** Gestor do contrato: Controle Geral e Dados. */
   const canAccessGestorTabs = isContractGestor(contractId);
+  /** Aba «Empreiteiros»: coluna própria na matriz de permissões do contrato (a API confere a edição dos números do Fluig). */
+  const canAccessEmpreiteirosModulo = canAccessContractEmpreiteirosTab(contractId);
   // Liberado na aba Contratos = operar no contrato (OS, produção, etc.).
   // Editar/excluir o cadastro do contrato na listagem exige Editar/Excluir na matriz Acesso.
   const hasThisContractAccess = isElevatedUser || canAccessContract(contractId);
@@ -1142,7 +1146,7 @@ export default function ContractDetailPage() {
     setPeriodTo(to);
   }, []);
   const [mainTab, setMainTab] = useState<
-    'resumo' | 'obras' | 'controle' | 'producao' | 'os' | 'pleitos' | 'faturamento' | 'fluig' | 'reunioes' | 'dados'
+    'resumo' | 'obras' | 'controle' | 'producao' | 'os' | 'pleitos' | 'faturamento' | 'empreiteiros' | 'fluig' | 'reunioes' | 'dados'
   >('resumo');
   const [showBillingModal, setShowBillingModal] = useState(false);
   const [showPleitoModal, setShowPleitoModal] = useState(false);
@@ -2055,6 +2059,7 @@ export default function ContractDetailPage() {
     if (canAccessOrdemServicoModulo) tabs.push('os');
     if (canAccessPleitosModulo) tabs.push('pleitos');
     if (canAccessFaturamentoModulo) tabs.push('faturamento');
+    if (canAccessEmpreiteirosModulo) tabs.push('empreiteiros');
     if (canAccessFluigModulo) tabs.push('fluig');
     // Reuniões: só para o gestor do contrato (junto com Controle Geral e Dados).
     if (canAccessGestorTabs) tabs.push('reunioes');
@@ -2068,6 +2073,7 @@ export default function ContractDetailPage() {
     canAccessOrdemServicoModulo,
     canAccessPleitosModulo,
     canAccessFaturamentoModulo,
+    canAccessEmpreiteirosModulo,
     canAccessFluigModulo,
   ]);
 
@@ -5004,6 +5010,15 @@ export default function ContractDetailPage() {
                 Faturamento
               </AppUnderlineTabButton>
             ) : null}
+            {canAccessEmpreiteirosModulo ? (
+              <AppUnderlineTabButton
+                active={mainTab === 'empreiteiros'}
+                onClick={() => setMainTab('empreiteiros')}
+                className="whitespace-nowrap px-3 py-2.5 text-sm"
+              >
+                Empreiteiros
+              </AppUnderlineTabButton>
+            ) : null}
             {canAccessFluigModulo ? (
               <AppUnderlineTabButton
                 active={mainTab === 'fluig'}
@@ -5046,6 +5061,10 @@ export default function ContractDetailPage() {
           ) : null}
 
           {mainTab === 'obras' && canAccessObrasModulo ? <ContratoObrasTab contractId={contractId} canManage={canAccessObrasModulo} /> : null}
+
+          {mainTab === 'empreiteiros' && canAccessEmpreiteirosModulo ? (
+            <ContratoEmpreiteirosTab contractId={contractId} canManage={canAccessEmpreiteirosModulo} />
+          ) : null}
 
           {mainTab === 'resumo' && canAccessResumoModulo ? (
           <div className="space-y-5">

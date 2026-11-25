@@ -3204,6 +3204,9 @@ async function ensureUserContractPleitosFaturamentoColumns(prisma: PrismaClient)
     `ALTER TABLE "user_contract_permissions" ADD COLUMN IF NOT EXISTS "accessObras" BOOLEAN NOT NULL DEFAULT false;`
   );
   await prisma.$executeRawUnsafe(
+    `ALTER TABLE "user_contract_permissions" ADD COLUMN IF NOT EXISTS "accessEmpreiteiros" BOOLEAN NOT NULL DEFAULT false;`
+  );
+  await prisma.$executeRawUnsafe(
     `ALTER TABLE "user_contract_permissions" ADD COLUMN IF NOT EXISTS "accessComprador" BOOLEAN NOT NULL DEFAULT false;`
   );
   if (!pleitosJaExistia) {

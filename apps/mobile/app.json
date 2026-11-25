@@ -3,7 +3,7 @@
     "name": "Gennesis Conecta",
     "slug": "sistema-ponto-engenharia",
     "scheme": "gennesis",
-    "version": "1.0.16",
+    "version": "1.0.17",
     "orientation": "portrait",
     "icon": "./assets/logo-ios.png",
     "userInterfaceStyle": "automatic",
@@ -27,7 +27,7 @@
       "buildNumber": "2"
     },
     "android": {
-      "versionCode": 24,
+      "versionCode": 25,
       "icon": "./assets/logo-android.png",
       "adaptiveIcon": {
         "foregroundImage": "./assets/logo-android.png",

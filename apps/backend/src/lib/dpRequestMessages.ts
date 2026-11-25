@@ -105,6 +105,27 @@ function notifyParticipants(
   })().catch(() => undefined);
 }
 
+/**
+ * Solicitação nova na fila de quem gerencia (Pendente DP): avisa por push quem tem acesso à página
+ * de gerenciar — a de ADM/TST para pedidos administrativos, a do DP para os demais. Nunca lança.
+ */
+export function notifyManagersNewDpRequest(
+  row: { id: string; requestType: string; displayNumber?: number | null; title?: string | null },
+  actorUserId?: string | null
+) {
+  void (async () => {
+    const key = isAdmRow(row) ? ADM_MANAGE_KEY : DP_MANAGE_KEY;
+    const recipients = (await userIdsWithModule(key)).filter((id) => id !== actorUserId);
+    if (recipients.length === 0) return;
+    const num = row.displayNumber != null ? ` #${row.displayNumber}` : '';
+    await sendPushToUsers(recipients, {
+      title: 'Nova solicitação na fila',
+      body: `${row.title?.trim() || 'Solicitação'}${num}`,
+      data: { type: 'dp-request-new', kind: 'dp', entityId: row.id },
+    });
+  })().catch((err) => console.warn('[push] falha ao avisar gerentes de DP:', err instanceof Error ? err.message : err));
+}
+
 async function loadRowOrThrow(id: string) {
   const row = await prisma.dpRequest.findUnique({ where: { id } });
   if (!row) throw createError('Solicitação não encontrada', 404);
