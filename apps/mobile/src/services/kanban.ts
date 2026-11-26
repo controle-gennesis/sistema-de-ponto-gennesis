@@ -90,6 +90,8 @@ export type KanbanBoardSummary = {
   isOwner: boolean;
   canManageShares?: boolean;
   sharedWithMe: boolean;
+  createdByName?: string | null;
+  createdAt?: string;
 };
 
 export type KanbanChecklistItem = {

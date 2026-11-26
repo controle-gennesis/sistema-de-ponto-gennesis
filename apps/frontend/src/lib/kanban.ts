@@ -105,6 +105,9 @@ export interface KanbanBoardSummary {
   isOwner: boolean;
   canManageShares: boolean;
   sharedWithMe: boolean;
+  /** Só nos quadros criados manualmente. */
+  createdByName?: string | null;
+  createdAt?: string;
 }
 
 export interface KanbanBoardShare {

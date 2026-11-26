@@ -2709,6 +2709,12 @@ function KanbanBoardPicker({
                       )}
                     >
                       {b.department}
+                      {b.createdByName ? (
+                        <span className="block text-xs font-normal text-gray-400 dark:text-gray-500">
+                          Criado por {b.createdByName}
+                          {b.createdAt ? ` em ${new Date(b.createdAt).toLocaleDateString('pt-BR')}` : ''}
+                        </span>
+                      ) : null}
                     </button>
                     <div className="flex shrink-0 items-center">
                       <KanbanBoardRowActions

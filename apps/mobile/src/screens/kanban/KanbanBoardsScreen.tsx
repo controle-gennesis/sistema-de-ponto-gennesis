@@ -200,6 +200,11 @@ export default function KanbanBoardsScreen() {
                     {board.isOwnDepartment ? ' · Seu setor' : ''}
                     {board.sharedWithMe ? ' · Compartilhado' : ''}
                   </Text>
+                  {board.createdByName ? (
+                    <Text style={styles.cardMeta} numberOfLines={1}>
+                      Criado por {board.createdByName}
+                    </Text>
+                  ) : null}
                 </View>
                 {board.isCustom && board.isOwner ? (
                   <TouchableOpacity

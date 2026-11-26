@@ -1136,6 +1136,8 @@ export class KanbanService {
       departmentLabel: true,
       isCustom: true,
       createdById: true,
+      creator: { select: { name: true } },
+      createdAt: true,
       archivedAt: true,
       updatedAt: true,
       _count: { select: { columns: true } },
@@ -1155,6 +1157,9 @@ export class KanbanService {
       isOwner: boolean;
       canManageShares: boolean;
       sharedWithMe: boolean;
+      /** Só nos quadros criados manualmente. */
+      createdByName?: string | null;
+      createdAt?: string;
     }> = [];
 
     const pushBoard = (b: {
@@ -1165,6 +1170,8 @@ export class KanbanService {
       departmentLabel: string;
       isCustom: boolean;
       createdById: string | null;
+      creator?: { name: string } | null;
+      createdAt?: Date;
       updatedAt: Date;
       _count: { columns: number };
     }) => {
@@ -1183,6 +1190,8 @@ export class KanbanService {
         isOwner: b.isCustom && b.createdById === userId,
         canManageShares: b.isCustom && b.createdById === userId,
         sharedWithMe: b.isCustom && b.createdById !== userId,
+        createdByName: b.isCustom ? (b.creator?.name ?? null) : null,
+        createdAt: b.createdAt?.toISOString(),
       });
     };
 
