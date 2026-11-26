@@ -16,6 +16,9 @@ import { Archive, ArchiveRestore, Check, Pencil, Plus, Share2, Tag, Trash2 } fro
 import Toast from 'react-native-toast-message';
 import { useTheme } from '../context/ThemeContext';
 import KanbanSheet from './KanbanSheet';
+import CenteredTextInput from './CenteredTextInput';
+import SheetModal, { SheetPrimaryButton } from './SheetModal';
+import FormFieldLabel from './FormFieldLabel';
 import { MemberAvatar, MemberPickerSheet } from './KanbanMemberUi';
 import {
   addKanbanBoardShare,
@@ -111,8 +114,8 @@ export function ColumnEditModal({
   boardQueryKey: readonly unknown[];
   onClose: () => void;
 }) {
-  const { colors } = useTheme();
-  const styles = useMemo(() => getStyles(colors), [colors]);
+  const { colors, isDark } = useTheme();
+  const form = useMemo(() => getFormStyles(colors, isDark), [colors, isDark]);
   const queryClient = useQueryClient();
   const [title, setTitle] = useState('');
   const [color, setColor] = useState(KANBAN_COLUMN_COLORS[0]);
@@ -177,42 +180,113 @@ export function ColumnEditModal({
   };
 
   return (
-    <Sheet visible={!!column} onClose={onClose} title="Editar coluna" subtitle="Nome, cor e limite de cards" icon={Pencil}>
-      <TextInput
+    <SheetModal visible={!!column} onClose={onClose} title="Editar coluna">
+      <FormFieldLabel label="Nome" required style={form.label} />
+      <CenteredTextInput
         value={title}
         onChangeText={setTitle}
         placeholder="Nome da coluna"
         placeholderTextColor={colors.textSecondary}
-        style={styles.input}
+        boxStyle={form.box}
+        style={form.input}
       />
-      <Text style={styles.fieldLabel}>Cor</Text>
-      <View style={styles.swatchRow}>
-        {KANBAN_COLUMN_COLORS.map((c) => (
-          <TouchableOpacity
-            key={c}
-            onPress={() => setColor(c)}
-            style={[styles.swatch, { backgroundColor: c }, color === c && styles.swatchActive]}
-          />
-        ))}
+
+      <FormFieldLabel label="Cor" style={form.label} />
+      <View style={form.grid}>
+        {KANBAN_COLUMN_COLORS.map((c) => {
+          const active = color === c;
+          return (
+            <View key={c} style={form.cell}>
+              <TouchableOpacity
+                onPress={() => setColor(c)}
+                style={[form.swatch, { backgroundColor: c }, active && form.swatchActive]}
+                activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+              >
+                {active ? <Check size={18} color="#fff" strokeWidth={3} /> : null}
+              </TouchableOpacity>
+            </View>
+          );
+        })}
       </View>
-      <Text style={styles.fieldLabel}>Limite de cards (opcional)</Text>
-      <TextInput
+
+      <FormFieldLabel label="Limite de cards (opcional)" style={form.label} />
+      <CenteredTextInput
         value={limit}
         onChangeText={(t) => setLimit(t.replace(/\D/g, ''))}
         placeholder="Sem limite"
         placeholderTextColor={colors.textSecondary}
         keyboardType="number-pad"
-        style={styles.input}
+        boxStyle={form.box}
+        style={form.input}
       />
-      <TouchableOpacity style={styles.primaryBtn} onPress={() => void save()} disabled={saving}>
-        {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Salvar</Text>}
-      </TouchableOpacity>
-      <TouchableOpacity style={styles.dangerBtn} onPress={remove}>
-        <Trash2 size={16} color={colors.error} />
-        <Text style={[styles.dangerText, { color: colors.error }]}>Excluir coluna</Text>
-      </TouchableOpacity>
-    </Sheet>
+
+      <View style={form.action}>
+        <SheetPrimaryButton label="Salvar" loading={saving} disabled={!title.trim()} onPress={() => void save()} />
+        <TouchableOpacity style={form.remove} onPress={remove} disabled={saving}>
+          <Text style={form.removeText}>Excluir coluna</Text>
+        </TouchableOpacity>
+      </View>
+    </SheetModal>
   );
+}
+
+/** Mesmo visual de formulário da janela de capa. */
+function getFormStyles(colors: any, isDark: boolean) {
+  const line = isDark ? 'transparent' : 'rgba(15, 23, 42, 0.08)';
+  const fieldBg = isDark ? colors.card : colors.surface;
+  const field = { backgroundColor: fieldBg, borderWidth: StyleSheet.hairlineWidth * 1.5, borderColor: line };
+  return StyleSheet.create({
+    empty: { textAlign: 'center', color: colors.textSecondary, marginVertical: 24, fontSize: 14 },
+    list: { gap: 8, paddingBottom: 6 },
+    row: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 12, ...field },
+    rowTitle: { fontSize: 14, fontWeight: '600', color: colors.text },
+    rowMeta: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+    rowAction: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6 },
+    rowActionText: { fontSize: 13, fontWeight: '700', color: colors.primary },
+    labelRow: {
+      minHeight: 44,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 10,
+      paddingHorizontal: 14,
+      borderRadius: 12,
+      marginBottom: 8,
+    },
+    labelRowText: { flexShrink: 1, fontSize: 14, fontWeight: '700' },
+    labelPreview: { height: 52, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+    addButton: {
+      minHeight: 44,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      borderRadius: 12,
+      ...field,
+    },
+    addButtonText: { fontSize: 14, fontWeight: '600', color: colors.text },
+    cellSmall: { width: '20%', paddingHorizontal: 4, marginBottom: 8 },
+    label: { fontSize: 13, fontWeight: '600', marginBottom: 8, letterSpacing: -0.1, color: colors.textSecondary },
+    box: {
+      height: 50,
+      paddingHorizontal: 14,
+      borderRadius: 12,
+      backgroundColor: isDark ? colors.card : colors.surface,
+      borderWidth: StyleSheet.hairlineWidth * 1.5,
+      borderColor: line,
+      marginBottom: 14,
+    },
+    input: { color: colors.text, fontSize: 15 },
+    grid: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -4, marginBottom: 6 },
+    cell: { width: '25%', paddingHorizontal: 4, marginBottom: 8 },
+    swatch: { height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+    swatchActive: { borderWidth: 2.5, borderColor: colors.text },
+    action: { marginTop: 8, paddingBottom: 6 },
+    remove: { alignItems: 'center', paddingVertical: 12 },
+    removeText: { color: colors.primary, fontSize: 14, fontWeight: '700' },
+  });
 }
 
 /** Cards arquivados do quadro, com botão de restaurar. */
@@ -231,8 +305,8 @@ export function ArchivedCardsModal({
   onClose: () => void;
   onOpenCard: (cardId: string) => void;
 }) {
-  const { colors } = useTheme();
-  const styles = useMemo(() => getStyles(colors), [colors]);
+  const { colors, isDark } = useTheme();
+  const form = useMemo(() => getFormStyles(colors, isDark), [colors, isDark]);
   const queryClient = useQueryClient();
 
   const archivedQuery = useQuery({
@@ -257,21 +331,15 @@ export function ArchivedCardsModal({
   const list = archivedQuery.data ?? [];
 
   return (
-    <Sheet
-      visible={visible}
-      onClose={onClose}
-      title="Cards arquivados"
-      subtitle="Restaure um card para ele voltar ao quadro"
-      icon={Archive}
-    >
+    <SheetModal visible={visible} onClose={onClose} title="Cards arquivados">
       {archivedQuery.isLoading ? (
         <ActivityIndicator color={colors.primary} style={{ marginVertical: 24 }} />
       ) : list.length === 0 ? (
-        <Text style={styles.empty}>Nenhum card arquivado</Text>
+        <Text style={form.empty}>Nenhum card arquivado</Text>
       ) : (
-        <ScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={false}>
+        <View style={form.list}>
           {list.map((c) => (
-            <View key={c.id} style={styles.listRow}>
+            <View key={c.id} style={form.row}>
               <TouchableOpacity
                 style={{ flex: 1 }}
                 activeOpacity={0.7}
@@ -280,28 +348,24 @@ export function ArchivedCardsModal({
                   onOpenCard(c.id);
                 }}
               >
-                <Text style={styles.rowTitle} numberOfLines={2}>
+                <Text style={form.rowTitle} numberOfLines={2}>
                   {c.title || 'Sem título'}
                 </Text>
-                <Text style={styles.rowMeta} numberOfLines={1}>
+                <Text style={form.rowMeta} numberOfLines={1}>
                   {c.columnTitle}
                 </Text>
               </TouchableOpacity>
               {canWrite ? (
-                <TouchableOpacity
-                  style={styles.restoreBtn}
-                  onPress={() => void restore(c.id)}
-                  hitSlop={6}
-                >
+                <TouchableOpacity style={form.rowAction} onPress={() => void restore(c.id)} hitSlop={6}>
                   <ArchiveRestore size={15} color={colors.primary} />
-                  <Text style={[styles.restoreText, { color: colors.primary }]}>Restaurar</Text>
+                  <Text style={form.rowActionText}>Restaurar</Text>
                 </TouchableOpacity>
               ) : null}
             </View>
           ))}
-        </ScrollView>
+        </View>
       )}
-    </Sheet>
+    </SheetModal>
   );
 }
 
@@ -319,8 +383,8 @@ export function LabelSettingsModal({
   boardQueryKey: readonly unknown[];
   onClose: () => void;
 }) {
-  const { colors } = useTheme();
-  const styles = useMemo(() => getStyles(colors), [colors]);
+  const { colors, isDark } = useTheme();
+  const form = useMemo(() => getFormStyles(colors, isDark), [colors, isDark]);
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState<Array<KanbanLabelPreset & { origColor?: string }>>([]);
   const [saving, setSaving] = useState(false);
@@ -409,109 +473,91 @@ export function LabelSettingsModal({
   const previewFg = labelTextColor(editColor);
 
   return (
-    <Sheet
+    <SheetModal
       visible={visible}
       onClose={onClose}
+      onBack={editing === null ? undefined : closeEdit}
       title={editing === null ? 'Etiquetas do quadro' : 'Editar etiqueta'}
-      subtitle={
-        editing === null ? 'Toque numa etiqueta para mudar nome e cor' : 'Escolha o nome e a cor'
-      }
-      icon={Tag}
     >
       {editing === null ? (
         <>
-          <ScrollView
-            style={{ maxHeight: Dimensions.get('window').height * 0.45 }}
-            showsVerticalScrollIndicator={false}
-          >
-            {draft.map((p, i) => {
-              const fg = labelTextColor(p.color);
-              return (
-                <TouchableOpacity
-                  key={i}
-                  activeOpacity={0.85}
-                  style={[styles.labelOption, { backgroundColor: p.color }]}
-                  onPress={() => openEdit(i)}
-                >
-                  <Text style={[styles.labelOptionText, { color: fg }]} numberOfLines={1}>
-                    {p.name || 'Sem nome'}
-                  </Text>
-                  <Pencil size={15} color={fg} />
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-          <TouchableOpacity style={styles.addLabelBtn} onPress={openNew}>
-            <Plus size={16} color={colors.primary} />
-            <Text style={[styles.linkText, { color: colors.primary }]}>Nova etiqueta</Text>
+          {draft.map((p, i) => {
+            const fg = labelTextColor(p.color);
+            return (
+              <TouchableOpacity
+                key={i}
+                activeOpacity={0.85}
+                style={[form.labelRow, { backgroundColor: p.color }]}
+                onPress={() => openEdit(i)}
+              >
+                <Text style={[form.labelRowText, { color: fg }]} numberOfLines={1}>
+                  {p.name || 'Sem nome'}
+                </Text>
+                <Pencil size={15} color={fg} />
+              </TouchableOpacity>
+            );
+          })}
+          <TouchableOpacity style={form.addButton} onPress={openNew}>
+            <Plus size={17} color={colors.text} />
+            <Text style={form.addButtonText}>Nova etiqueta</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.primaryBtn}
-            onPress={() => void save()}
-            disabled={saving}
-          >
-            {saving ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.primaryText}>Salvar</Text>
-            )}
-          </TouchableOpacity>
+          <View style={form.action}>
+            <SheetPrimaryButton label="Salvar" loading={saving} onPress={() => void save()} />
+          </View>
         </>
       ) : (
         <>
-          <View style={[styles.labelPreview, { backgroundColor: editColor }]}>
-            <Text style={[styles.labelPreviewText, { color: previewFg }]} numberOfLines={1}>
+          <View style={[form.labelPreview, { backgroundColor: editColor }]}>
+            <Text style={[form.labelRowText, { color: previewFg }]} numberOfLines={1}>
               {editName.trim() || 'Etiqueta'}
             </Text>
           </View>
 
-          <TextInput
+          <FormFieldLabel label="Nome" required style={form.label} />
+          <CenteredTextInput
             value={editName}
             onChangeText={setEditName}
             placeholder="Nome da etiqueta"
             placeholderTextColor={colors.textSecondary}
-            style={styles.input}
+            boxStyle={form.box}
+            style={form.input}
             autoCorrect={false}
           />
 
-          <Text style={styles.fieldLabel}>Cor</Text>
-          <View style={styles.colorGrid}>
+          <FormFieldLabel label="Cor" style={form.label} />
+          <View style={form.grid}>
             {LABEL_COLORS.map((c) => {
               const taken = usedByOthers.has(c.toLowerCase());
               const active = c.toLowerCase() === editColor.toLowerCase();
               return (
-                <TouchableOpacity
-                  key={c}
-                  disabled={taken}
-                  onPress={() => setEditColor(c)}
-                  activeOpacity={0.8}
-                  style={[
-                    styles.colorTile,
-                    { backgroundColor: c },
-                    active && styles.colorTileActive,
-                    taken && { opacity: 0.25 },
-                  ]}
-                >
-                  {active ? <Check size={18} color={labelTextColor(c)} strokeWidth={3} /> : null}
-                </TouchableOpacity>
+                <View key={c} style={form.cellSmall}>
+                  <TouchableOpacity
+                    disabled={taken}
+                    onPress={() => setEditColor(c)}
+                    activeOpacity={0.8}
+                    style={[
+                      form.swatch,
+                      { backgroundColor: c },
+                      active && form.swatchActive,
+                      taken && { opacity: 0.25 },
+                    ]}
+                  >
+                    {active ? <Check size={18} color={labelTextColor(c)} strokeWidth={3} /> : null}
+                  </TouchableOpacity>
+                </View>
               );
             })}
           </View>
 
-          <TouchableOpacity style={styles.primaryBtn} onPress={applyEdit}>
-            <Text style={styles.primaryText}>Concluído</Text>
-          </TouchableOpacity>
-          <View style={styles.editFooter}>
-            <TouchableOpacity onPress={closeEdit} hitSlop={8}>
-              <Text style={[styles.linkText, { color: colors.textSecondary }]}>Voltar</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={removeEdit} hitSlop={8}>
-              <Text style={[styles.linkText, { color: colors.error }]}>Excluir etiqueta</Text>
+          <View style={form.action}>
+            <SheetPrimaryButton label="Concluído" disabled={!editName.trim()} onPress={applyEdit} />
+            <TouchableOpacity style={form.remove} onPress={removeEdit}>
+              <Text style={form.removeText}>Excluir etiqueta</Text>
             </TouchableOpacity>
           </View>
         </>
       )}
-    </Sheet>
+    </SheetModal>
   );
 }
 
@@ -555,12 +601,13 @@ export function BoardRenameModal({
 
   return (
     <Sheet visible={!!board} onClose={onClose} title="Renomear quadro" subtitle="Escolha um novo nome" icon={Pencil}>
-      <TextInput
+      <CenteredTextInput
         value={name}
         onChangeText={setName}
         placeholder="Nome do quadro"
         placeholderTextColor={colors.textSecondary}
-        style={styles.input}
+        boxStyle={styles.inputBox}
+        style={styles.inputText}
         autoFocus
       />
       <TouchableOpacity style={styles.primaryBtn} onPress={() => void save()} disabled={saving}>
@@ -695,59 +742,16 @@ export function BoardShareModal({
 
 function getStyles(colors: any) {
   return StyleSheet.create({
-    overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-    sheet: {
-      backgroundColor: colors.surface,
-      borderTopLeftRadius: 20,
-      borderTopRightRadius: 20,
-      paddingHorizontal: 18,
-      paddingTop: 8,
-      paddingBottom: Platform.OS === 'ios' ? 28 : 18,
-      maxHeight: '85%',
-      borderTopWidth: 1,
-      borderColor: colors.border,
-    },
-    handle: {
-      alignSelf: 'center',
-      width: 40,
-      height: 4,
-      borderRadius: 2,
-      backgroundColor: colors.border,
-      marginBottom: 12,
-    },
-    head: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 14 },
-    title: { fontSize: 17, fontWeight: '700', color: colors.text },
-    subtitle: { fontSize: 13, color: colors.textSecondary, marginTop: 2 },
-    close: {
-      width: 32,
-      height: 32,
-      borderRadius: 16,
-      backgroundColor: colors.background,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    input: {
+    inputBox: {
+      height: 52,
       borderWidth: 1,
       borderColor: colors.border,
       borderRadius: 12,
       paddingHorizontal: 16,
-      paddingVertical: 15,
       backgroundColor: colors.background,
-      color: colors.text,
-      fontSize: 16,
       marginBottom: 10,
     },
-    fieldLabel: {
-      fontSize: 12,
-      fontWeight: '700',
-      color: colors.textSecondary,
-      textTransform: 'uppercase',
-      letterSpacing: 0.4,
-      marginBottom: 8,
-    },
-    swatchRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 14 },
-    swatch: { width: 32, height: 32, borderRadius: 16 },
-    swatchActive: { borderWidth: 3, borderColor: colors.text },
+    inputText: { color: colors.text, fontSize: 16 },
     primaryBtn: {
       backgroundColor: colors.primary,
       borderRadius: 12,
@@ -756,14 +760,6 @@ function getStyles(colors: any) {
       marginTop: 6,
     },
     primaryText: { color: '#fff', fontWeight: '700' },
-    dangerBtn: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 6,
-      paddingVertical: 14,
-    },
-    dangerText: { fontWeight: '600' },
     empty: { textAlign: 'center', color: colors.textSecondary, marginVertical: 24 },
     listRow: {
       flexDirection: 'row',
@@ -775,71 +771,6 @@ function getStyles(colors: any) {
     },
     rowTitle: { fontSize: 14, fontWeight: '600', color: colors.text },
     rowMeta: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
-    restoreBtn: { flexDirection: 'row', alignItems: 'center', gap: 6 },
     restoreText: { fontSize: 12, fontWeight: '700' },
-    toggleRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8 },
-    checkbox: {
-      width: 22,
-      height: 22,
-      borderRadius: 6,
-      borderWidth: 2,
-      borderColor: colors.border,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    checkboxOn: { backgroundColor: colors.primary, borderColor: colors.primary },
-    labelOption: {
-      minHeight: 44,
-      borderRadius: 10,
-      paddingHorizontal: 14,
-      paddingVertical: 12,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
-      marginBottom: 8,
-    },
-    labelOptionText: { flex: 1, fontSize: 14, fontWeight: '700' },
-    labelCheck: {
-      width: 22,
-      height: 22,
-      borderRadius: 11,
-      borderWidth: 2,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    linkBtn: { alignItems: 'center', paddingVertical: 10 },
-    linkText: { fontSize: 13, fontWeight: '700' },
-    labelPreview: {
-      minHeight: 48,
-      borderRadius: 12,
-      paddingHorizontal: 16,
-      justifyContent: 'center',
-      marginBottom: 14,
-    },
-    labelPreviewText: { fontSize: 15, fontWeight: '700' },
-    colorGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 6 },
-    colorTile: {
-      width: 44,
-      height: 44,
-      borderRadius: 12,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    colorTileActive: { borderWidth: 3, borderColor: colors.text },
-    editFooter: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingTop: 14,
-    },
-    labelEditRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-    labelDot: { width: 28, height: 28, borderRadius: 14 },
-    labelDotActive: { borderWidth: 3, borderColor: colors.text },
-    addLabelBtn: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      paddingVertical: 10,
-    },
   });
 }

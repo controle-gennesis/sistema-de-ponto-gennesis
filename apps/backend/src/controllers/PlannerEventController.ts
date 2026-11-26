@@ -1,3 +1,4 @@
+import { decodeUploadFileName } from '../lib/fixUploadFileName';
 import { Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import multer from 'multer';
@@ -545,7 +546,7 @@ export class PlannerEventController {
       await prisma.plannerEvent.update({
         where: { id },
         data: {
-          ataFileName: file.originalname || 'ata.pdf',
+          ataFileName: decodeUploadFileName(file.originalname) || 'ata.pdf',
           ataFileUrl: upload.url,
           ataFileKey: upload.key,
           ataFileSize: upload.size,

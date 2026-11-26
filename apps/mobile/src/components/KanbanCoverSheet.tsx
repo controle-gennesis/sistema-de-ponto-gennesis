@@ -54,7 +54,9 @@ export default function KanbanCoverSheet({
   const [color, setColor] = useState<string | null>(coverColor ?? null);
   const [size, setSize] = useState<CoverSize>(normalizeCoverSize(coverSize));
   const [saving, setSaving] = useState(false);
-  const [sending, setSending] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  /** Foto escolhida e ainda não salva. */
+  const [photo, setPhoto] = useState<string | null>(null);
 
   // Fundo vermelho do seletor de tamanho: desliza entre «Faixa» (0) e «Card inteiro» (1).
   const slide = useRef(new Animated.Value(normalizeCoverSize(coverSize) === 'FULL' ? 1 : 0)).current;
@@ -75,35 +77,41 @@ export default function KanbanCoverSheet({
     setColor(coverColor ?? null);
     setSize(normalizeCoverSize(coverSize));
     setSaving(false);
+    setPhoto(null);
     // Só ao abrir: uma atualização do card em segundo plano não desfaz a escolha em andamento.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
-  const save = async (nextColor: string | null, nextSize: CoverSize) => {
+  // Foto e cor se excluem: escolher uma tira a outra da prévia (e da capa, ao salvar).
+  const preview = photo ?? (color ? null : imageUri ?? null);
+  const unchanged = !photo && color === (coverColor ?? null) && size === normalizeCoverSize(coverSize);
+  const busy = saving || removing;
+
+  const save = async (nextColor: string | null, nextSize: CoverSize, nextPhoto: string | null = null) => {
     setSaving(true);
     try {
-      await onSave(nextColor, nextSize);
+      if (nextPhoto && onPickImage) {
+        await onPickImage(nextPhoto);
+        if (nextSize !== normalizeCoverSize(coverSize)) await onSave(null, nextSize);
+      } else {
+        await onSave(nextColor, nextSize);
+      }
       onClose();
+    } catch (e: any) {
+      Alert.alert('Capa', e?.message || 'Não foi possível salvar a capa');
     } finally {
       setSaving(false);
     }
   };
 
-  const unchanged = color === (coverColor ?? null) && size === normalizeCoverSize(coverSize);
-  const busy = saving || sending;
+  const choosePhoto = (uri: string) => {
+    setPhoto(uri);
+    setColor(null);
+  };
 
-  const sendImage = async (uri: string) => {
-    if (!onPickImage) return;
-    setSending(true);
-    try {
-      await onPickImage(uri);
-      // A foto substitui a cor.
-      setColor(null);
-    } catch (e: any) {
-      Alert.alert('Foto de capa', e?.message || 'Não foi possível usar essa imagem');
-    } finally {
-      setSending(false);
-    }
+  const chooseColor = (key: string) => {
+    setColor(key);
+    setPhoto(null);
   };
 
   const pickFrom = async (source: 'library' | 'camera') => {
@@ -127,19 +135,19 @@ export default function KanbanCoverSheet({
         ? await ImagePicker.launchCameraAsync(options)
         : await ImagePicker.launchImageLibraryAsync(options);
     if (result.canceled || !result.assets?.length) return;
-    await sendImage(result.assets[0].uri);
+    choosePhoto(result.assets[0].uri);
   };
 
   const removePhoto = async () => {
     if (!onRemoveImage) return;
-    setSending(true);
+    setRemoving(true);
     try {
       await onRemoveImage();
       onClose();
     } catch (e: any) {
       Alert.alert('Foto de capa', e?.message || 'Não foi possível remover a capa');
     } finally {
-      setSending(false);
+      setRemoving(false);
     }
   };
 
@@ -148,11 +156,11 @@ export default function KanbanCoverSheet({
       {onPickImage ? (
         <>
           <FormFieldLabel label="Foto" style={styles.label} />
-          {imageUri ? <Image source={{ uri: imageUri }} style={styles.preview} resizeMode="cover" /> : null}
-          {sending ? (
+          {preview ? <Image source={{ uri: preview }} style={styles.preview} resizeMode="cover" /> : null}
+          {removing ? (
             <View style={styles.sending}>
               <ActivityIndicator color={colors.primary} />
-              <Text style={styles.photoButtonText}>Salvando foto...</Text>
+              <Text style={styles.photoButtonText}>Removendo...</Text>
             </View>
           ) : (
             <View style={styles.photoRow}>
@@ -173,7 +181,7 @@ export default function KanbanCoverSheet({
                 {attachmentImages.map((att) => (
                   <TouchableOpacity
                     key={att.id}
-                    onPress={() => void sendImage(att.uri)}
+                    onPress={() => choosePhoto(att.uri)}
                     disabled={busy}
                     accessibilityLabel={`Usar ${att.fileName} como capa`}
                   >
@@ -194,7 +202,7 @@ export default function KanbanCoverSheet({
             <View key={c.key} style={styles.cell}>
               <TouchableOpacity
                 style={[styles.swatch, { backgroundColor: c.hex }, active && styles.swatchActive]}
-                onPress={() => setColor(c.key)}
+                onPress={() => chooseColor(c.key)}
                 activeOpacity={0.8}
                 accessibilityRole="button"
                 accessibilityLabel={c.label}
@@ -251,8 +259,8 @@ export default function KanbanCoverSheet({
         <SheetPrimaryButton
           label="Salvar"
           loading={saving}
-          disabled={sending || (!color && !imageUri) || unchanged}
-          onPress={() => void save(color, size)}
+          disabled={removing || (!color && !preview) || unchanged}
+          onPress={() => void save(color, size, photo)}
         />
         {coverColor || imageUri ? (
           <TouchableOpacity

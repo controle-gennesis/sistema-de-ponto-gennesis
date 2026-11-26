@@ -1,3 +1,4 @@
+import { formDataFile } from '../utils/formDataFile';
 import api from './api';
 import { readApiData } from './http';
 
@@ -246,8 +247,8 @@ export async function uploadKanbanCardCover(
   thumbUri: string,
 ): Promise<KanbanCard> {
   const form = new FormData();
-  form.append('image', { uri: imageUri, name: 'capa.jpg', type: 'image/jpeg' } as any);
-  form.append('thumb', { uri: thumbUri, name: 'capa-mini.jpg', type: 'image/jpeg' } as any);
+  form.append('image', formDataFile({ uri: imageUri, name: 'capa.jpg', type: 'image/jpeg' }));
+  form.append('thumb', formDataFile({ uri: thumbUri, name: 'capa-mini.jpg', type: 'image/jpeg' }));
   const res = await api.post(`/api/kanban/cards/${cardId}/cover`, form);
   return readApiData<KanbanCard>(res);
 }
@@ -328,11 +329,7 @@ export async function uploadKanbanAttachments(
 ): Promise<KanbanCardDetail> {
   const form = new FormData();
   for (const file of files) {
-    form.append('attachments', {
-      uri: file.uri,
-      name: file.name,
-      type: file.type,
-    } as any);
+    form.append('attachments', formDataFile(file));
   }
   const res = await api.post(`/api/kanban/cards/${cardId}/attachments`, form);
   return readApiData<KanbanCardDetail>(res);

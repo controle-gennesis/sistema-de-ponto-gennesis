@@ -3,6 +3,20 @@
  * gerando nomes como "CONSÃRCIO" / "ORÃAMENTO" / "RemoÃ§Ã£o".
  * Corrige quando o padrão de mojibake é detectado.
  */
+/**
+ * O fetch do Expo (app) envia o nome codificado como URL. Um nome codificado nunca tem espaços,
+ * então nomes comuns com «%» ficam como estão.
+ */
+export function decodeUploadFileName(name: string | null | undefined): string {
+  const raw = String(name ?? '');
+  if (/\s/.test(raw) || !/%[0-9A-F]{2}/.test(raw)) return raw;
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
 export function fixMulterOriginalName(name: string | null | undefined): string {
   const raw = String(name ?? '').trim();
   if (!raw) return '';

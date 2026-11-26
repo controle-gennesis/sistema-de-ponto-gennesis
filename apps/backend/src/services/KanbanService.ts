@@ -1,3 +1,4 @@
+import { decodeUploadFileName } from '../lib/fixUploadFileName';
 import { Prisma, TaskPriority, KanbanBoardSharePermission } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import {
@@ -3346,6 +3347,7 @@ export class KanbanService {
 
   /** Nome do arquivo vindo do upload: o multer lê o nome como latin1 e "ção" vira "Ã§Ã£o". Desfaz isso. */
   private fixUploadedFileName(name: string): string {
+    name = decodeUploadFileName(name);
     if (!name || !Array.from(name).some((ch) => ch.charCodeAt(0) > 127)) return name;
     const decoded = Buffer.from(name, 'latin1').toString('utf8');
     return decoded.includes(String.fromCharCode(0xfffd)) ? name : decoded;
