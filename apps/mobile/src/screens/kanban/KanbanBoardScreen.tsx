@@ -316,6 +316,18 @@ function BoardCardBase({
         : '#6b7280'
       : colors.text;
 
+  // A capa avança sobre a borda do cartão, senão sobra uma bordinha em volta dela. Com alguém no
+  // cartão a borda colorida de presença continua aparecendo.
+  const edge = presence && presence.length > 0 ? 0 : StyleSheet.hairlineWidth * 2;
+  const coverTop = {
+    marginHorizontal: -(14 + edge),
+    marginTop: -(14 + edge),
+    marginBottom: 10,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+  };
+  const coverFill = { position: 'absolute' as const, top: -edge, left: -edge, right: -edge, bottom: -edge, borderRadius: 16 };
+
   return (
     <TouchableOpacity
       style={[
@@ -336,7 +348,7 @@ function BoardCardBase({
       {photoStrip ? (
         <Image
           source={{ uri: coverImageUri }}
-          style={{ height: 130, marginHorizontal: -14, marginTop: -14, marginBottom: 10, borderTopLeftRadius: 15, borderTopRightRadius: 15 }}
+          style={[{ height: 130 }, coverTop]}
           resizeMode="cover"
         />
       ) : null}
@@ -344,15 +356,15 @@ function BoardCardBase({
         <>
           <Image
             source={{ uri: coverImageUri }}
-            style={[StyleSheet.absoluteFill, { borderRadius: 15 }]}
+            style={coverFill}
             resizeMode="cover"
           />
           {/* Escurece a foto para o título continuar legível. */}
-          <View style={[StyleSheet.absoluteFill, { borderRadius: 15, backgroundColor: 'rgba(0,0,0,0.5)' }]} />
+          <View style={[coverFill, { backgroundColor: 'rgba(0,0,0,0.5)' }]} />
         </>
       ) : null}
       {coverStrip ? (
-        <View style={{ height: 34, backgroundColor: coverColorHex ?? undefined, marginHorizontal: -14, marginTop: -14, marginBottom: 10, borderTopLeftRadius: 15, borderTopRightRadius: 15 }} />
+        <View style={[{ height: 34, backgroundColor: coverColorHex ?? undefined }, coverTop]} />
       ) : null}
       {presence && presence.length > 0 ? (
         <View style={[styles.presenceTag, { backgroundColor: presence[0].color }]}>

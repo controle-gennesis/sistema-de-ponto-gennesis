@@ -421,17 +421,9 @@ function animateKanbanReorder(
     const id = el.getAttribute(idAttribute);
     if (!id) return;
 
-    // O card solto já está onde a pessoa largou: só assenta, sem «voar» do lugar antigo.
-    if (id === droppedId) {
-      el.animate(
-        [
-          { transform: 'scale(1.03)', opacity: 0.7 },
-          { transform: 'scale(1)', opacity: 1 },
-        ],
-        { duration: 200, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' },
-      );
-      return;
-    }
+    // O card solto não desliza do lugar antigo: quem leva ele até o novo é a cópia que estava no
+    // cursor (kanbanCardDragGhost).
+    if (id === droppedId) return;
 
     const first = beforeRects.get(id);
     if (!first) return;
@@ -1202,8 +1194,9 @@ function KanbanCardItem({
         isDragging
           ? 'z-10 opacity-50'
           : [
-              'hover:border-gray-200/80 hover:brightness-[0.985]',
-              'dark:hover:border-gray-600/70 dark:hover:brightness-110',
+              'hover:brightness-[0.985] dark:hover:brightness-110',
+              // Capa no card inteiro: sem contorno nem ao passar o mouse.
+              !coverFull && 'hover:border-gray-200/80 dark:hover:border-gray-600/70',
             ],
       )}
     >
@@ -1214,7 +1207,8 @@ function KanbanCardItem({
           alt=""
           loading="lazy"
           draggable={false}
-          className="-mx-4 -mt-4 mb-3 block h-36 w-[calc(100%+2rem)] max-w-none rounded-t-2xl object-cover"
+          // 17px = respiro do card + a borda de 1px, que senão aparece em volta da capa.
+          className="-mx-[17px] -mt-[17px] mb-3 block h-36 w-[calc(100%+34px)] max-w-none rounded-t-2xl object-cover"
         />
       ) : null}
       {photoFull ? (
@@ -1224,18 +1218,18 @@ function KanbanCardItem({
             alt=""
             loading="lazy"
             draggable={false}
-            className="absolute inset-0 h-full w-full rounded-2xl object-cover"
+            className="absolute -left-px -top-px h-[calc(100%+2px)] w-[calc(100%+2px)] max-w-none rounded-2xl object-cover"
           />
           {/* Escurece a foto para o título continuar legível. */}
           <div
-            className="absolute inset-0 rounded-2xl bg-gradient-to-t from-black/80 via-black/40 to-black/10"
+            className="absolute -inset-px rounded-2xl bg-gradient-to-t from-black/80 via-black/40 to-black/10"
             aria-hidden
           />
         </>
       ) : null}
       {coverStrip ? (
         <div
-          className="-mx-4 -mt-4 mb-3 h-9 rounded-t-2xl"
+          className="-mx-[17px] -mt-[17px] mb-3 h-9 rounded-t-2xl"
           style={{ backgroundColor: coverColorHex ?? undefined }}
           aria-hidden
         />
