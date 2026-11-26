@@ -1,3 +1,4 @@
+import { formDataFile } from '../utils/formDataFile';
 import api from './api';
 import { readApiData, readApiJson } from './http';
 
@@ -144,11 +145,7 @@ export async function uploadPlannerEventAta(
   file: { uri: string; name: string; type: string },
 ): Promise<PlannerEvent> {
   const form = new FormData();
-  form.append('ata', {
-    uri: file.uri,
-    name: file.name,
-    type: file.type,
-  } as any);
+  form.append('ata', formDataFile(file));
   const res = await api.post(`/api/planner-events/${id}/ata`, form);
   return readApiData<PlannerEvent>(res);
 }

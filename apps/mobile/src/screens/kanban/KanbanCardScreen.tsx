@@ -50,6 +50,7 @@ import { coverHex } from '../../lib/kanbanCover';
 import { downloadCoverSource, prepareCoverImages } from '../../lib/kanbanCoverImage';
 import { resolveMediaUrl } from '../../utils/resolveMediaUrl';
 import KanbanMoveSheet from '../../components/KanbanMoveSheet';
+import CenteredTextInput from '../../components/CenteredTextInput';
 import { MemberAvatar, MemberPickerSheet } from '../../components/KanbanMemberUi';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -1344,12 +1345,13 @@ export default function KanbanCardScreen() {
             ))}
             {!readOnly ? (
               <View style={styles.addRow}>
-                <TextInput
+                <CenteredTextInput
                   value={checklistTitle}
                   onChangeText={setChecklistTitle}
                   placeholder="Adicionar tarefa..."
                   placeholderTextColor={colors.textSecondary}
-                  style={styles.addInput}
+                  boxStyle={styles.addBox}
+                  style={styles.addBoxInput}
                   onSubmitEditing={() => void addChecklist()}
                 />
                 <TouchableOpacity style={styles.iconBtn} onPress={() => void addChecklist()}>
@@ -1525,15 +1527,17 @@ export default function KanbanCardScreen() {
             ) : null}
 
             <View style={styles.addRow}>
-              <TextInput
+              <CenteredTextInput
                 onChangeText={setComment}
+                empty={!comment}
                 placeholder="Escrever comentário... (@ para marcar)"
                 placeholderTextColor={colors.textSecondary}
-                style={styles.addInput}
+                boxStyle={styles.addBox}
+                style={styles.addBoxInput}
                 onSubmitEditing={() => void sendComment()}
               >
                 {renderMentions(comment, mentionNames, styles.mentionInputText, true)}
-              </TextInput>
+              </CenteredTextInput>
               <TouchableOpacity style={styles.iconBtn} onPress={() => void sendComment()}>
                 <Send size={16} color="#fff" />
               </TouchableOpacity>
@@ -2104,16 +2108,15 @@ function getStyles(colors: any, _isDark: boolean) {
       fontWeight: '600',
     },
     addRow: { flexDirection: 'row', gap: 8, marginTop: 6 },
-    addInput: {
+    addBox: {
       flex: 1,
       height: 42,
       borderRadius: 10,
       paddingHorizontal: 12,
-      paddingTop: 0,
-      paddingBottom: 4,
-      textAlignVertical: 'center',
-      fontSize: 15,
       backgroundColor: colors.background,
+    },
+    addBoxInput: {
+      fontSize: 15,
       color: colors.text,
     },
     iconBtn: {
