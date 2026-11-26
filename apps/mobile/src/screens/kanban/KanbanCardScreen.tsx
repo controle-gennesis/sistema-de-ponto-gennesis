@@ -46,6 +46,7 @@ import AppHeader from '../../components/AppHeader';
 import KanbanMaterialsSheet from '../../components/KanbanMaterialsSheet';
 import KanbanSheet from '../../components/KanbanSheet';
 import KanbanCoverSheet from '../../components/KanbanCoverSheet';
+import { coverHex } from '../../lib/kanbanCover';
 import { downloadCoverSource, prepareCoverImages } from '../../lib/kanbanCoverImage';
 import { resolveMediaUrl } from '../../utils/resolveMediaUrl';
 import KanbanMoveSheet from '../../components/KanbanMoveSheet';
@@ -981,6 +982,15 @@ export default function KanbanCardScreen() {
             source={{ uri: resolveMediaUrl(card.coverThumbUrl) }}
             style={{ width: '100%', height: 150, borderRadius: 14, marginBottom: 12 }}
             resizeMode="cover"
+          />
+        ) : coverHex(card.coverColor) ? (
+          <View
+            style={{
+              height: 72,
+              borderRadius: 14,
+              marginBottom: 12,
+              backgroundColor: coverHex(card.coverColor) ?? undefined,
+            }}
           />
         ) : null}
         <View style={styles.metaRow}>

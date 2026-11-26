@@ -2340,8 +2340,10 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     ? displayedModuleId
     : activeModuleId ?? (onHomeRoute || onRailFooterRoute ? null : displayedModuleId);
 
+  // O balão de atalhos continua aberto ao trocar de página (fecha clicando fora);
+  // no celular ele fecha junto com a gaveta do menu.
   useEffect(() => {
-    setMenuAtalhosRail(null);
+    if (window.matchMedia('(max-width: 1023px)').matches) setMenuAtalhosRail(null);
   }, [pathname]);
 
   useEffect(() => {
@@ -2803,7 +2805,6 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
                           }
                           aria-current={active ? 'page' : undefined}
                           onClick={(event: React.MouseEvent) => {
-                            setMenuAtalhosRail(null);
                             if (!active) return;
                             event.preventDefault();
                             bumpRailPop(popId);

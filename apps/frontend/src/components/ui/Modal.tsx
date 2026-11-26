@@ -78,6 +78,8 @@ export interface ModalProps {
   headerClassName?: string;
   /** Classes extras no painel do modal (ex.: altura fixa na aba de comentários). */
   panelClassName?: string;
+  /** Faixa de largura total acima do cabeçalho (ex.: capa do card). */
+  banner?: React.ReactNode;
   /** Rodapé fixo (botões): fica fora da área de rolagem e aparece sempre. */
   footer?: React.ReactNode;
 }
@@ -100,6 +102,7 @@ export const Modal: React.FC<ModalProps> = ({
   contentClassName,
   headerClassName,
   panelClassName,
+  banner,
   footer,
 }) => {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -202,6 +205,8 @@ export const Modal: React.FC<ModalProps> = ({
             visible ? 'app-modal-panel--open' : 'app-modal-panel--closed',
           )}
         >
+          {banner ? <div className="shrink-0">{banner}</div> : null}
+
           {/* Header */}
           {(title || showCloseButton || headerActions) && (
             <div
