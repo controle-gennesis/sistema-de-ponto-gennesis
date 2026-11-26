@@ -8,6 +8,7 @@ import {
   type AnalisePreliminarData,
 } from './licitacaoAnalisePreliminar';
 import { LicitacaoChecklistResumo } from './LicitacaoChecklistResumo';
+import { LicitacaoAnaliseClaudeResumo } from './LicitacaoAnaliseClaudeResumo';
 import { LicitacaoNaoSeHabilitaPanel } from './LicitacaoNaoSeHabilitaPanel';
 import type { ChecklistResumoSection } from './licitacaoChecklist';
 import type { NaoSeHabilitaItem } from './LicitacaoNaoSeHabilitaPanel';
@@ -33,6 +34,8 @@ export type LicitacaoAnalisesCarregadasProps = {
   showDiretoria?: boolean;
   decisaoLabel?: string | null;
   analiseFinalTexto?: string | null;
+  /** PDF e recomendação da Análise Claude */
+  analiseClaude?: unknown;
   /** Anexos / documentos */
   anexos?: Array<{ id: string; nome: string; url?: string | null }>;
   className?: string;
@@ -62,6 +65,7 @@ export function LicitacaoAnalisesCarregadas({
   decisaoLabel,
   analiseFinalTexto,
   anexos = [],
+  analiseClaude,
   className = '',
 }: LicitacaoAnalisesCarregadasProps) {
   const prelim = parseAnalisePreliminar(analisePreliminar, titulo ?? '');
@@ -112,6 +116,8 @@ export function LicitacaoAnalisesCarregadas({
           </CardContent>
         </Card>
       ) : null}
+
+      <LicitacaoAnaliseClaudeResumo analise={analiseClaude} />
 
       {showPreliminar ? (
         <Card padding="none" className="shadow-sm">

@@ -199,7 +199,8 @@ export async function ensureLicitacaoForAceite(
     estado,
     regiaoKey: aceite.regiaoKey?.trim().toLowerCase() || undefined,
     status: 'EM_ANALISE',
-    analiseEtapa: 'preliminar',
+    // O processo começa na Análise Claude (PDF anexado) antes da Análise Preliminar.
+    analiseEtapa: 'claude',
     analiseJson: buildAnaliseJson(aceite),
   });
 

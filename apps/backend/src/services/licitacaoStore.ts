@@ -20,7 +20,7 @@ export function isLicitacaoArquivadaMotivo(value: unknown): value is LicitacaoAr
   );
 }
 
-export const LICITACAO_ANALISE_ETAPAS = ['preliminar', 'em_analise'] as const;
+export const LICITACAO_ANALISE_ETAPAS = ['claude', 'preliminar', 'em_analise'] as const;
 export type LicitacaoAnaliseEtapa = (typeof LICITACAO_ANALISE_ETAPAS)[number];
 
 export function isLicitacaoAnaliseEtapa(value: unknown): value is LicitacaoAnaliseEtapa {

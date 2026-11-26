@@ -11,6 +11,7 @@ import multer from 'multer';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
+import { fixMulterOriginalName } from '../lib/fixUploadFileName';
 import { licitacaoService } from '../services/LicitacaoService';
 import {
   isLicitacaoArquivadaMotivo,
@@ -1024,7 +1025,7 @@ export class LicitacaoController {
       const etapaRaw =
         typeof req.body?.etapa === 'string' ? req.body.etapa.trim().toLowerCase() : '';
       if (!isLicitacaoAnaliseEtapa(etapaRaw)) {
-        throw createError('Informe a etapa: preliminar ou em_analise.', 400);
+        throw createError('Informe a etapa: claude, preliminar ou em_analise.', 400);
       }
       const data = await licitacaoService.setAnaliseEtapa(req.params.id, etapaRaw);
       res.json({
@@ -1033,8 +1034,54 @@ export class LicitacaoController {
         message:
           etapaRaw === 'em_analise'
             ? 'Enviada para a aba Em Análise.'
-            : 'Enviada para a aba Análise Preliminar.',
+            : etapaRaw === 'claude'
+              ? 'Enviada para a aba Análise Claude.'
+              : 'Enviada para a aba Análise Preliminar.',
       });
+    } catch (error) {
+      next(error instanceof Error ? createError(error.message, 400) : error);
+    }
+  }
+
+  async uploadPdfAnaliseClaude(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.file?.buffer) throw createError('Selecione o PDF da análise', 400);
+      const user = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { name: true } });
+      const data = await licitacaoService.salvarPdfAnaliseClaude(
+        req.params.id,
+        { ...req.file, originalname: fixMulterOriginalName(req.file.originalname) },
+        user?.name ?? null
+      );
+      res.status(201).json({ success: true, data });
+    } catch (error) {
+      next(error instanceof Error ? createError(error.message, 400) : error);
+    }
+  }
+
+  async salvarDadosAnaliseClaude(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const body = req.body ?? {};
+      const dados: Parameters<typeof licitacaoService.salvarDadosAnaliseClaude>[1] = {};
+      if (body.recomendacao !== undefined) {
+        dados.recomendacao = String(body.recomendacao ?? '').trim().slice(0, 4000) || null;
+      }
+      if (body.linkClaude !== undefined) {
+        const link = String(body.linkClaude ?? '').trim();
+        if (link && !/^https?:\/\/\S+$/i.test(link)) throw createError('Informe um link válido', 400);
+        dados.linkClaude = link.slice(0, 2000) || null;
+      }
+      const data = await licitacaoService.salvarDadosAnaliseClaude(req.params.id, dados);
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error instanceof Error ? createError(error.message, 400) : error);
+    }
+  }
+
+  async rejeitarAnaliseClaude(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const motivo = typeof req.body?.motivo === 'string' ? req.body.motivo : '';
+      const data = await licitacaoService.rejeitarAnaliseClaude(req.params.id, motivo);
+      res.json({ success: true, data });
     } catch (error) {
       next(error instanceof Error ? createError(error.message, 400) : error);
     }

@@ -185,7 +185,36 @@ export type LicitacaoAnalisePreliminar = {
   descontoMaximo?: string;
 };
 
+/** PDF da análise feita na Claude e anexado pela equipe. */
+export type LicitacaoAnaliseClaude = {
+  nome?: string | null;
+  url?: string | null;
+  enviadoEm?: string | null;
+  enviadoPorNome?: string | null;
+  /** Texto livre escrito pela equipe. */
+  recomendacao?: string | null;
+  rejeicaoMotivo?: string | null;
+  /** Conversa/projeto na Claude onde a análise foi feita. */
+  linkClaude?: string | null;
+};
+
+function parseAnaliseClaude(raw: unknown): LicitacaoAnaliseClaude | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v : null);
+  return {
+    nome: text(o.nome),
+    url: text(o.url),
+    enviadoEm: text(o.enviadoEm),
+    enviadoPorNome: text(o.enviadoPorNome),
+    recomendacao: text(o.recomendacao),
+    rejeicaoMotivo: text(o.rejeicaoMotivo),
+    linkClaude: text(o.linkClaude),
+  };
+}
+
 export type LicitacaoAnalisePersistida = {
+  analiseClaude?: LicitacaoAnaliseClaude | null;
   ultimaExtracao?: (LicitacaoExtracao & { extraidoEm?: string; respostaBruta?: string }) | null;
   historicoExtracoes: Array<LicitacaoExtracao & { extraidoEm: string; respostaBruta?: string }>;
   conversas: LicitacaoConversa[];
@@ -432,6 +461,7 @@ function parseAnaliseJson(raw: unknown): LicitacaoAnalisePersistida {
     linkPastaDrive: typeof o.linkPastaDrive === 'string' ? o.linkPastaDrive : null,
     checklistAnalise: parseChecklistAnalise(o.checklistAnalise),
     analisePreliminar: parseAnalisePreliminar(o.analisePreliminar),
+    analiseClaude: parseAnaliseClaude(o.analiseClaude),
     naoSeHabilita: o.naoSeHabilita === true,
     naoSeHabilitaItens: parseNaoSeHabilitaItens(o.naoSeHabilitaItens),
     analiseManualFinalizada: o.analiseManualFinalizada === true,
@@ -521,6 +551,7 @@ function mergeAnaliseJson(
 ): LicitacaoAnalisePersistida {
   const base = parseAnaliseJson(current);
   return {
+    analiseClaude: patch.analiseClaude !== undefined ? patch.analiseClaude : base.analiseClaude,
     ultimaExtracao: patch.ultimaExtracao !== undefined ? patch.ultimaExtracao : base.ultimaExtracao,
     historicoExtracoes: patch.historicoExtracoes ?? base.historicoExtracoes,
     conversas: patch.conversas ?? base.conversas,
@@ -1194,6 +1225,14 @@ export class LicitacaoService {
     if (!current) throw new Error('Licitação não encontrada');
 
     const atual = resolveAnaliseEtapa(current.analiseEtapa);
+    if (atual === 'claude' && etapa !== 'claude') {
+      const analise = parseAnaliseJson(current.analiseJson).analiseClaude;
+      if (!analise?.url || !analise.linkClaude || !analise.recomendacao?.trim()) {
+        throw new Error(
+          'Preencha o link da Claude, a recomendação e anexe o PDF antes de passar para a Análise Preliminar.'
+        );
+      }
+    }
     if (!current.arquivada && atual === etapa) {
       return serializeLicitacao(current);
     }
@@ -1214,6 +1253,70 @@ export class LicitacaoService {
         : {}),
     });
     return serializeLicitacao(row);
+  }
+
+  /** Anexa (ou troca) o PDF da análise da Claude. */
+  async salvarPdfAnaliseClaude(
+    id: string,
+    file: { buffer: Buffer; originalname: string; mimetype: string },
+    enviadoPorNome: string | null
+  ) {
+    const current = await licitacaoStoreGetById(id);
+    if (!current) throw new Error('Licitação não encontrada');
+    if (!file.buffer?.length) throw new Error('O arquivo está vazio. Escolha o PDF novamente.');
+    if (file.buffer.subarray(0, 5).toString() !== '%PDF-') throw new Error('Envie o arquivo em PDF.');
+
+    const saved = await savePersistentUpload({
+      folder: UPLOAD_SUBDIR,
+      buffer: file.buffer,
+      originalName: file.originalname,
+      mimeType: 'application/pdf',
+    });
+    const anterior = parseAnaliseJson(current.analiseJson).analiseClaude;
+    const row = await licitacaoStoreUpdate(id, {
+      analiseJson: mergeAnaliseJson(current.analiseJson, {
+        analiseClaude: {
+          ...anterior,
+          nome: saved.originalName || 'analise-claude.pdf',
+          url: saved.url,
+          enviadoEm: new Date().toISOString(),
+          enviadoPorNome,
+          rejeicaoMotivo: null,
+        },
+      }),
+    });
+    return serializeLicitacao(row);
+  }
+
+  /** Grava a recomendação e/ou o link da Claude (só o que for informado). */
+  async salvarDadosAnaliseClaude(
+    id: string,
+    dados: { recomendacao?: string | null; linkClaude?: string | null }
+  ) {
+    const current = await licitacaoStoreGetById(id);
+    if (!current) throw new Error('Licitação não encontrada');
+    const anterior = parseAnaliseJson(current.analiseJson).analiseClaude;
+    const row = await licitacaoStoreUpdate(id, {
+      analiseJson: mergeAnaliseJson(current.analiseJson, {
+        analiseClaude: { ...anterior, ...dados },
+      }),
+    });
+    return serializeLicitacao(row);
+  }
+
+  /** Rejeitada na Análise Claude: vai para o Arquivo como declinada, com o motivo. */
+  async rejeitarAnaliseClaude(id: string, motivo: string) {
+    const current = await licitacaoStoreGetById(id);
+    if (!current) throw new Error('Licitação não encontrada');
+    const texto = motivo.trim().slice(0, 2000);
+    if (!texto) throw new Error('Informe o motivo da rejeição.');
+    const anterior = parseAnaliseJson(current.analiseJson).analiseClaude;
+    await licitacaoStoreUpdate(id, {
+      analiseJson: mergeAnaliseJson(current.analiseJson, {
+        analiseClaude: { ...anterior, rejeicaoMotivo: texto },
+      }),
+    });
+    return this.enviarParaArquivo(id, 'declinada');
   }
 
   async delete(id: string) {

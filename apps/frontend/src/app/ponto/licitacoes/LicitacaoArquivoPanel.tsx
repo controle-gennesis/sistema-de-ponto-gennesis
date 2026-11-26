@@ -94,6 +94,7 @@ type LicitacaoArquivoItem = {
   }>;
   analiseJson?: {
     analisePreliminar?: unknown;
+    analiseClaude?: unknown;
     linkNotebookLm?: string | null;
     analiseUsuario?: string | null;
     responsavelAnalise?: string | null;
@@ -414,6 +415,7 @@ export function LicitacaoArquivoPanel() {
 
                 <LicitacaoAnalisesCarregadas
                   titulo={buildLicitacaoTituloDisplay(selected)}
+                  analiseClaude={selected.analiseJson?.analiseClaude}
                   showPreliminar
                   analisePreliminar={selected.analiseJson?.analisePreliminar}
                   showNotebook

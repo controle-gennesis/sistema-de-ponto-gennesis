@@ -154,6 +154,19 @@ router.delete('/:id/orcamento/anexo/:anexoId', (req, res, next) =>
 router.patch('/:id', (req, res, next) => ctrl.update(req, res, next));
 router.delete('/:id', (req, res, next) => ctrl.delete(req, res, next));
 
+router.post('/:id/analise-claude', (req: AuthRequest, res: Response, next: NextFunction) => {
+  ctrl.uploadMiddleware(req, res, (err: unknown) => {
+    if (err) {
+      const msg = err instanceof Error ? err.message : 'Erro no upload';
+      res.status(400).json({ success: false, message: msg });
+      return;
+    }
+    void ctrl.uploadPdfAnaliseClaude(req, res, next);
+  });
+});
+router.patch('/:id/analise-claude', (req, res, next) => ctrl.salvarDadosAnaliseClaude(req, res, next));
+router.post('/:id/analise-claude/rejeitar', (req, res, next) => ctrl.rejeitarAnaliseClaude(req, res, next));
+
 router.post('/:id/documentos', (req: AuthRequest, res: Response, next: NextFunction) => {
   ctrl.uploadMiddleware(req, res, (err: unknown) => {
     if (err) {

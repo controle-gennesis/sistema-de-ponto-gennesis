@@ -184,6 +184,7 @@ type LicitacaoListItem = {
     arquivadaMotivo?: string | null;
     statusSelecionado?: string | null;
     analisePreliminar?: unknown;
+    analiseClaude?: unknown;
     linkNotebookLm?: string | null;
     analiseUsuario?: string | null;
     responsavelAnalise?: string | null;
@@ -1219,6 +1220,7 @@ export function LicitacaoOrcamentoPanel() {
             <LicitacaoAnalisesCarregadas
               className="mt-1"
               titulo={buildLicitacaoTituloDisplay(selectedAnalise)}
+              analiseClaude={selectedAnalise.analiseJson?.analiseClaude}
               showPreliminar
               analisePreliminar={selectedAnalise.analiseJson?.analisePreliminar}
               showNotebook

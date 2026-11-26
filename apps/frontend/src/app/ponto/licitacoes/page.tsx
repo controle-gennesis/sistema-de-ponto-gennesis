@@ -42,6 +42,8 @@ import { LicitacaoChecklistEditor } from './LicitacaoChecklistEditor';
 import { LicitacaoChecklistResumo } from './LicitacaoChecklistResumo';
 import { LicitacaoAnalisePreliminarForm } from './LicitacaoAnalisePreliminarForm';
 import { LicitacaoAnalisesCarregadas } from './LicitacaoAnalisesCarregadas';
+import { LicitacaoAnaliseClaudePanel, type AnaliseClaudeData } from './LicitacaoAnaliseClaudePanel';
+import { LicitacaoAnaliseClaudeResumo } from './LicitacaoAnaliseClaudeResumo';
 import {
   emptyAnalisePreliminar,
   parseAnalisePreliminar,
@@ -86,6 +88,7 @@ const BRASIL_UFS = [
 
 type LicitacaoViewMode =
   | 'analise'
+  | 'claude'
   | 'preliminar'
   | 'arquivadas'
   | 'orcamento'
@@ -95,10 +98,10 @@ type LicitacaoViewMode =
   | 'consulta-rapida-cats'
   | 'habilitacao-pendente';
 
-type LicitacaoAnaliseEtapa = 'preliminar' | 'em_analise';
+type LicitacaoAnaliseEtapa = 'claude' | 'preliminar' | 'em_analise';
 
 function resolveAnaliseEtapa(value: unknown): LicitacaoAnaliseEtapa {
-  return value === 'preliminar' ? 'preliminar' : 'em_analise';
+  return value === 'claude' || value === 'preliminar' ? value : 'em_analise';
 }
 
 type LicitacaoArquivadaMotivo =
@@ -279,6 +282,7 @@ type LicitacaoConversa = {
 };
 
 type LicitacaoAnaliseJson = {
+  analiseClaude?: AnaliseClaudeData | null;
   ultimaExtracao?: Record<string, unknown> | null;
   historicoExtracoes?: Array<Record<string, unknown>>;
   conversas?: LicitacaoConversa[];
@@ -527,6 +531,7 @@ export default function LicitacoesPage() {
     if (
       saved === 'regioes' ||
       saved === 'arquivadas' ||
+      saved === 'claude' ||
       saved === 'preliminar' ||
       saved === 'banco-cats' ||
       saved === 'consulta-rapida-cats' ||
@@ -2069,7 +2074,7 @@ export default function LicitacoesPage() {
                   ? 'Nenhuma análise com os filtros selecionados.'
                   : 'Nenhuma análise em Análise Diretoria.'
                 : isPreliminarView
-                  ? 'Nenhum processo na Análise Preliminar. Aceite licitações na aba Por região.'
+                  ? 'Nenhum processo na Análise Preliminar. Envie processos pela aba Análise Claude.'
                   : 'Nenhum processo em Em Análise. Envie processos pela Análise Preliminar (Status → Em Análise).'}
           </p>
         ) : (
@@ -2340,6 +2345,7 @@ export default function LicitacoesPage() {
               [
                 { id: 'arquivo' as const, label: 'Arquivo' },
                 { id: 'regioes' as const, label: 'Por Região' },
+                { id: 'claude' as const, label: 'Análise Claude' },
                 { id: 'preliminar' as const, label: 'Análise Preliminar' },
                 { id: 'analise' as const, label: 'Em Análise' },
                 { id: 'arquivadas' as const, label: 'Análise Diretoria' },
@@ -2442,6 +2448,8 @@ export default function LicitacoesPage() {
 
           {viewMode === 'regioes' ? (
             <LicitacoesRegiaoPanel regiaoKey={planilhaRegiaoKey} />
+          ) : viewMode === 'claude' ? (
+            <LicitacaoAnaliseClaudePanel />
           ) : viewMode === 'arquivo' ? (
             <LicitacaoArquivoPanel />
           ) : isCatsView ? (
@@ -2593,7 +2601,7 @@ export default function LicitacoesPage() {
                       {isArquivadasView
                         ? 'Abra a lista de licitações para consultar as análises da Diretoria.'
                         : isPreliminarView
-                          ? 'Abra a lista de licitações para escolher um processo. Eles aparecem após o aceite em Por região.'
+                          ? 'Abra a lista de licitações para escolher um processo. Eles chegam pela aba Análise Claude.'
                           : 'Abra a lista de licitações para escolher um processo. Eles chegam aqui ao enviar da Análise Preliminar.'}
                     </p>
                     <button
@@ -2839,8 +2847,13 @@ export default function LicitacoesPage() {
                     </Card>
                   ) : null}
 
+                  {isPreliminarView ? (
+                    <LicitacaoAnaliseClaudeResumo analise={display?.analiseJson?.analiseClaude} />
+                  ) : null}
+
                   {!isPreliminarView && !isArquivadasView ? (
                     <LicitacaoAnalisesCarregadas
+                      analiseClaude={display?.analiseJson?.analiseClaude}
                       titulo={display ? buildLicitacaoTituloDisplay(display) : undefined}
                       showPreliminar
                       analisePreliminar={analisePreliminar}
@@ -2854,6 +2867,7 @@ export default function LicitacoesPage() {
 
                   {isArquivadasView ? (
                     <LicitacaoAnalisesCarregadas
+                      analiseClaude={display?.analiseJson?.analiseClaude}
                       titulo={display ? buildLicitacaoTituloDisplay(display) : undefined}
                       showPreliminar
                       analisePreliminar={analisePreliminar}
