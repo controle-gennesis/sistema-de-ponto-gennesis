@@ -8,19 +8,16 @@ import {
   AlertTriangle,
   ArrowDown,
   ArrowUp,
-  ChevronDown,
-  ChevronRight,
   Clock,
   Columns3,
   Download,
-  ListFilter,
+  Filter,
   Loader2,
   RefreshCw,
   Rows3,
   Search,
   Users,
   Wallet,
-  X,
 } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -35,6 +32,8 @@ import {
   getCadastroListRange,
 } from '@/components/ui/CadastroListSummary';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
+import { getListTableRowClassName, ListRowNavigableLabel } from '@/components/ui/listTableUi';
+import { Modal } from '@/components/ui/Modal';
 import { MultiSelectSearchDropdown } from '@/components/ui/MultiSelectSearchDropdown';
 import { exportBrandedExcelTable } from '@/lib/exportBrandedExcelTable';
 import api from '@/lib/api';
@@ -128,22 +127,50 @@ const FILTROS: {
   { key: 'filial', label: 'Filial', nomes: /^filial$/i, todos: 'Todas as filiais' },
   { key: 'nome', label: 'Nome', nomes: /^(nome|funcionario|nome_?funcionario)$/i, todos: 'Todos os funcionários' },
 ];
-/** Colunas que começam escondidas (o usuário pode mostrar no menu "Colunas"). */
-const COLUNAS_OCULTAS_PADRAO = new Set([
-  'CHAPA',
-  'CODSECAO',
-  'CODFUNCAO',
-  'DEPARTAMENTO',
-  'CODCENTROCUSTO',
-  'CENTROCUSTOCOMPLETO',
-  'BANCO',
-  'AGENCIA',
-  'TIPOCONTA',
-  'TIPOCHAVE',
-  'CONTAPAGAMENTO',
-]);
+/** Colunas que aparecem por padrão, nesta ordem; as demais ficam no botão de colunas. */
+const COLUNAS_PADRAO = ['NOME', 'CENTROCUSTO', 'COLIGADA', 'SITUACAO', 'EVENTO', 'SALARIO', 'VALOR'];
+/** Informação que vai na segunda linha de outra coluna (não vira coluna própria). */
+const LINHA_DE_BAIXO: Record<string, string> = { NOME: 'FUNCAO', CENTROCUSTO: 'SECAO', EVENTO: 'TIPOEVENTO' };
+const NOMES_EMBUTIDOS = new Set(Object.values(LINHA_DE_BAIXO));
+const TITULOS: Record<string, string> = {
+  NOME: 'Funcionário',
+  CENTROCUSTO: 'Centro de custo',
+  COLIGADA: 'Empresa',
+  SITUACAO: 'Situação',
+  EVENTO: 'Evento',
+  SALARIO: 'Salário',
+  VALOR: 'Valor',
+  CHAPA: 'Matrícula',
+  SECAO: 'Seção',
+  FILIAL: 'Filial',
+  FUNCAO: 'Função',
+  CODSECAO: 'Código da seção',
+  CODFUNCAO: 'Código da função',
+  TIPOFUNC: 'Tipo de funcionário',
+  DTADMISSAO: 'Data de admissão',
+  DTDEMISSAO: 'Data de demissão',
+  TIPOEVENTO: 'Tipo de evento',
+  DEPARTAMENTO: 'Departamento',
+  CODCENTROCUSTO: 'Código do centro de custo',
+  CENTROCUSTOCOMPLETO: 'Centro de custo completo',
+  CONTAPAGAMENTO: 'Conta de pagamento',
+  BANCO: 'Banco',
+  AGENCIA: 'Agência',
+  TIPOCONTA: 'Tipo de conta',
+  TIPOCHAVE: 'Tipo de chave Pix',
+  ANO: 'Ano',
+  MES: 'Mês',
+  PERIODO: 'Período',
+};
 const normalizarChave = (k: string) => k.toUpperCase().replace(/[^A-Z0-9]/g, '');
-const STORAGE_COLUNAS = 'previa-folha:colunas-ocultas';
+const STORAGE_COLUNAS = 'previa-folha:colunas-ocultas-v2';
+const tituloColuna = (c: { key: string; label: string }) => TITULOS[normalizarChave(c.key)] ?? c.label;
+const ehMoeda = (c: { key: string; somavel: boolean }) => c.somavel || normalizarChave(c.key) === 'SALARIO';
+/** Funcionário à esquerda, valores à direita, o resto centralizado. */
+const alinhamento = (c: { key: string; somavel: boolean }) =>
+  ehMoeda(c) ? 'text-right' : normalizarChave(c.key) === 'NOME' ? 'text-left' : 'text-center';
+/** «01 - GENNESIS» → «GENNESIS». */
+const semCodigo = (v: string) => v.replace(/^\s*[A-Z0-9]{1,6}\s+-\s+/i, '').trim();
 
 const FILTROS_VAZIOS: Record<FiltroKey, string[]> = { ano: [], mes: [], polo: [], cc: [], filial: [], nome: [] };
 /** Polos marcados por padrão (o usuário pode trocar no filtro Polo). */
@@ -189,167 +216,243 @@ function exibirCelula(col: Coluna, v: unknown): string {
   return dataIso(v) ?? textoCelula(v);
 }
 
+const COR_SITUACAO: Record<string, string> = {
+  A: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200',
+  F: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200',
+  D: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200',
+};
+
+/** Conteúdo de uma célula da lista de lançamentos. */
+function CelulaFolha({ coluna, linha, extra }: { coluna: Coluna; linha: Record<string, unknown>; extra?: string }) {
+  const chave = normalizarChave(coluna.key);
+  const bruto = textoCelula(linha[coluna.key]);
+  const baixo = extra ? textoCelula(linha[extra]) : '';
+  const vazio = <span className="text-gray-400">—</span>;
+  const limpo = !bruto || /^n\/inf/i.test(bruto) ? '' : bruto;
+
+  if (ehMoeda(coluna)) {
+    const n = numeroDe(linha[coluna.key]);
+    if (n == null) return vazio;
+    return (
+      <span
+        className={['tabular-nums', n < 0 ? 'text-red-600 dark:text-red-400' : '', chave === 'VALOR' ? 'font-semibold' : ''].join(' ')}
+      >
+        {n < 0 ? '- ' : ''}R$ {fmtMoeda(Math.abs(n))}
+      </span>
+    );
+  }
+  if (chave === 'SITUACAO') {
+    if (!limpo) return vazio;
+    const cor =
+      COR_SITUACAO[limpo.charAt(0).toUpperCase()] ?? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200';
+    return (
+      <span className={'inline-flex whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ' + cor}>
+        {semCodigo(limpo)}
+      </span>
+    );
+  }
+  if (chave === 'NOME' || chave === 'CENTROCUSTO' || chave === 'EVENTO') {
+    const principal = chave === 'EVENTO' ? semCodigo(limpo) : limpo;
+    const tipo = chave !== 'EVENTO' ? '' : /provento/i.test(baixo) ? 'Provento' : /desconto/i.test(baixo) ? 'Desconto' : '';
+    const segunda = chave === 'EVENTO' ? tipo : baixo;
+    const corSegunda =
+      tipo === 'Provento'
+        ? 'text-emerald-600 dark:text-emerald-400'
+        : tipo === 'Desconto'
+          ? 'text-red-600 dark:text-red-400'
+          : 'text-gray-500 dark:text-gray-400';
+    return (
+      <div className="min-w-0">
+        <p
+          className={'whitespace-nowrap ' + (chave === 'NOME' ? 'font-medium text-gray-900 dark:text-white' : '')}
+          title={principal}
+        >
+          {principal || vazio}
+        </p>
+        {segunda ? (
+          <p className={'whitespace-nowrap text-xs ' + corSegunda} title={segunda}>
+            {segunda}
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+  const texto = chave === 'COLIGADA' || chave === 'FILIAL' ? semCodigo(limpo) : limpo ? exibirCelula(coluna, linha[coluna.key]) : '';
+  return texto ? (
+    <span
+      className={chave === 'COLIGADA' || chave === 'FILIAL' ? 'block whitespace-nowrap' : 'mx-auto block max-w-[280px] truncate'}
+      title={texto}
+    >
+      {texto}
+    </span>
+  ) : (
+    vazio
+  );
+}
+
+const NOMES_MESES = [
+  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
+];
+
+/** «11-NOV» ou «11» vira «Novembro»; formato desconhecido fica como veio. */
+function nomeDoMes(valor: string): string {
+  const n = Number(valor.match(/^\s*(\d{1,2})/)?.[1]);
+  return NOMES_MESES[n - 1] ?? valor;
+}
+
 function fmtDataHora(iso: string | null): string {
   if (!iso) return '—';
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 }
 
-function EventosDaLinha({ eventos, resultado }: { eventos: EventoResumo[]; resultado: number }) {
-  const moeda = (n: number) => `R$ ${fmtMoeda(n)}`;
+function EventosDaLinha({
+  eventos,
+  resultado,
+  colaboradores,
+}: {
+  eventos: EventoResumo[];
+  resultado: number;
+  colaboradores: number;
+}) {
+  const moeda = (n: number) => (n < 0 ? '- ' : '') + 'R$ ' + fmtMoeda(Math.abs(n));
   const proventos = eventos.filter((e) => e.tipo === 'P');
   const descontos = eventos.filter((e) => e.tipo === 'D');
   const soma = (l: EventoResumo[]) => l.reduce((s, e) => s + e.valor, 0);
-  const bloco = (titulo: string, lista: EventoResumo[], cor: string) => (
-    <div className="min-w-0 rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900/40">
-      <div className={`flex items-center justify-between border-b border-gray-200 px-3 py-2 text-sm font-semibold dark:border-gray-700 ${cor}`}>
-        <span>
-          {titulo} <span className="font-normal text-gray-500 dark:text-gray-400">({lista.length})</span>
-        </span>
-        <span className="tabular-nums">{moeda(soma(lista))}</span>
+  const cartoes = [
+    { rotulo: 'Colaboradores', valor: colaboradores.toLocaleString('pt-BR'), cor: 'text-gray-900 dark:text-white' },
+    { rotulo: 'Proventos', valor: moeda(soma(proventos)), cor: 'text-emerald-600 dark:text-emerald-400' },
+    { rotulo: 'Descontos', valor: moeda(soma(descontos)), cor: 'text-red-600 dark:text-red-400' },
+    { rotulo: 'Resultado', valor: moeda(resultado), cor: 'text-gray-900 dark:text-white' },
+  ];
+  const bloco = (titulo: string, lista: EventoResumo[], ponto: string) => (
+    <div className="min-w-0">
+      <div className="mb-1 flex items-center gap-2 border-b border-gray-200 pb-2 dark:border-gray-700">
+        <span className={'h-2.5 w-2.5 rounded-full ' + ponto} aria-hidden />
+        <h4 className="text-sm font-semibold text-gray-900 dark:text-white">{titulo}</h4>
+        <span className="text-xs text-gray-500 dark:text-gray-400">{lista.length}</span>
       </div>
       {lista.length ? (
-        <ul className="max-h-80 divide-y divide-gray-100 overflow-y-auto dark:divide-gray-800">
+        <ul className="divide-y divide-gray-100 dark:divide-gray-700/70">
           {lista.map((e) => (
-            <li key={e.nome} className="flex items-center justify-between gap-3 px-3 py-1.5 text-sm">
-              <span className="min-w-0 truncate text-gray-700 dark:text-gray-300" title={e.nome}>
-                {e.nome}
+            <li key={e.nome} className="flex items-center justify-between gap-3 py-2 text-sm">
+              <span className="min-w-0 truncate text-gray-600 dark:text-gray-300" title={e.nome}>
+                {semCodigo(e.nome)}
               </span>
-              <span className={`shrink-0 tabular-nums font-medium ${e.valor < 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-gray-100'}`}>
-                {moeda(e.valor)}
-              </span>
+              <span className="shrink-0 font-medium tabular-nums text-gray-900 dark:text-gray-100">{moeda(e.valor)}</span>
             </li>
           ))}
         </ul>
       ) : (
-        <p className="px-3 py-3 text-sm text-gray-500 dark:text-gray-400">Nenhum evento.</p>
+        <p className="py-3 text-sm text-gray-500 dark:text-gray-400">Nenhum evento.</p>
       )}
     </div>
   );
   return (
-    <div className="space-y-3 bg-gray-50/80 px-4 py-4 dark:bg-gray-800/30">
-      <div className="grid gap-3 md:grid-cols-2">
-        {bloco('Proventos', proventos, 'text-emerald-700 dark:text-emerald-400')}
-        {bloco('Descontos', descontos, 'text-red-700 dark:text-red-400')}
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {cartoes.map((c) => (
+          <div key={c.rotulo} className="min-w-0 rounded-lg border border-gray-200 px-4 py-3 dark:border-gray-700">
+            <p className="text-[11px] font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">{c.rotulo}</p>
+            <p className={'mt-0.5 truncate text-base font-bold tabular-nums ' + c.cor} title={c.valor}>
+              {c.valor}
+            </p>
+          </div>
+        ))}
       </div>
-      <p className="text-right text-sm text-gray-600 dark:text-gray-300">
-        Proventos {moeda(soma(proventos))} + Descontos {moeda(soma(descontos))} ={' '}
-        <span className="font-bold text-gray-900 dark:text-white">{moeda(resultado)}</span>
-      </p>
+      <div className="grid items-start gap-6 md:grid-cols-2">
+        {bloco('Proventos', proventos, 'bg-emerald-500')}
+        {bloco('Descontos', descontos, 'bg-red-500')}
+      </div>
     </div>
   );
 }
 
-function ResumoFolhaTabela({ dados, coluna }: { dados: ResumoDimensao; coluna: string }) {
-  const [abertas, setAbertas] = useState<Set<string>>(new Set());
+function ResumoFolhaTabela({
+  dados,
+  coluna,
+  busca,
+}: {
+  dados: ResumoDimensao;
+  coluna: string;
+  busca: string;
+}) {
+  const [abertaNome, setAbertaNome] = useState<string | null>(null);
+  const detalhe = dados.linhas.find((l) => l.nome === abertaNome) ?? null;
   const moeda = (n: number) => `R$ ${fmtMoeda(n)}`;
-  const th = 'whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:text-sm';
-  const tdNum = 'whitespace-nowrap px-4 py-3.5 text-right tabular-nums';
   const maior = Math.max(1, ...dados.linhas.map((l) => Math.abs(l.resultado)));
-  const todasAbertas = dados.linhas.length > 0 && dados.linhas.every((l) => abertas.has(l.nome));
-  const alternar = (nome: string) =>
-    setAbertas((prev) => {
-      const n = new Set(prev);
-      if (n.has(nome)) n.delete(nome);
-      else n.add(nome);
-      return n;
-    });
+  const termo = busca.trim().toLowerCase();
+  // A posição (ID) é a do ranking completo, mesmo quando a busca esconde linhas.
+  const linhas = dados.linhas
+    .map((l, i) => ({ ...l, posicao: i + 1 }))
+    .filter((l) => !termo || l.nome.toLowerCase().includes(termo));
+  if (linhas.length === 0) {
+    return <CadastroListEmpty icon={Wallet} title="Nenhum registro encontrado" hint="Tente ajustar a busca ou os filtros." />;
+  }
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm text-gray-500 dark:text-gray-400">Clique numa linha para ver os eventos (proventos e descontos).</p>
-        <button
-          type="button"
-          onClick={() => setAbertas(todasAbertas ? new Set() : new Set(dados.linhas.map((l) => l.nome)))}
-          className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-sm font-medium text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
-        >
-          {todasAbertas ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-          {todasAbertas ? 'Recolher todos' : 'Expandir todos'}
-        </button>
-      </div>
-      <div className="w-full overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700">
-        <table className="w-full min-w-[720px] table-fixed border-collapse">
-          <colgroup>
-            <col />
-            <col className="w-40" />
-            <col className="w-56" />
-            <col className="w-72" />
-          </colgroup>
-          <thead className="bg-gray-50 dark:bg-gray-800/80">
-            <tr className="border-b border-gray-200 dark:border-gray-700">
-              <th className={`${th} text-left`}>{coluna}</th>
-              <th className={`${th} text-right`}>Colaboradores</th>
-              <th className={`${th} text-right`}>Resultado da folha</th>
-              <th className={`${th} text-left`}>% do total</th>
+    <>
+      <CadastroListSummary
+        startItem={1}
+        endItem={linhas.length}
+        total={linhas.length}
+        itemLabel="linha"
+        itemLabelPlural="linhas"
+        currentPage={1}
+        totalPages={1}
+      />
+      <div className={cadastroListClasses.tableScroll}>
+        <table className={cadastroListClasses.table} data-cc-skip-column-customizer="1">
+          <thead className="border-b border-gray-200 dark:border-gray-700">
+            <tr>
+              <th className={`${cadastroListClasses.th} text-center`} style={{ width: '5rem' }}>ID</th>
+              <th className={`${cadastroListClasses.th} text-left`}>{coluna}</th>
+              <th className={`${cadastroListClasses.th} text-center`}>Colaboradores</th>
+              <th className={`${cadastroListClasses.th} text-right`}>Resultado da folha</th>
+              <th className={`${cadastroListClasses.th} text-left`}>% do total</th>
             </tr>
           </thead>
-          <tbody>
-            {dados.linhas.map((l, i) => {
-              const aberta = abertas.has(l.nome);
-              return (
-                <React.Fragment key={l.nome}>
-                  <tr
-                    onClick={() => alternar(l.nome)}
-                    className={`cursor-pointer border-b border-gray-100 text-[15px] text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-700/70 dark:text-gray-100 dark:hover:bg-gray-800/50 ${
-                      aberta ? 'bg-gray-50 dark:bg-gray-800/50' : ''
-                    }`}
-                    aria-expanded={aberta}
-                  >
-                    <td className="px-4 py-3.5">
-                      <div className="flex min-w-0 items-center gap-3">
-                        {aberta ? (
-                          <ChevronDown className="h-4 w-4 shrink-0 text-gray-400" />
-                        ) : (
-                          <ChevronRight className="h-4 w-4 shrink-0 text-gray-400" />
-                        )}
-                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-red-50 text-xs font-bold text-red-600 dark:bg-red-950/50 dark:text-red-400">
-                          {i + 1}
-                        </span>
-                        <span className="truncate font-medium" title={l.nome}>
-                          {l.nome}
-                        </span>
-                      </div>
+          <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
+            {linhas.map((l) => (
+                  <tr key={l.nome} onClick={() => setAbertaNome(l.nome)} className={getListTableRowClassName(true)}>
+                    <td className={`${cadastroListClasses.tdMono} text-center`}>{l.posicao}</td>
+                    <td className="px-3 py-4 sm:px-6">
+                      <ListRowNavigableLabel className="font-medium">{l.nome}</ListRowNavigableLabel>
                     </td>
-                    <td className={tdNum}>{l.colaboradores.toLocaleString('pt-BR')}</td>
-                    <td className={`${tdNum} font-semibold ${l.resultado < 0 ? 'text-red-600 dark:text-red-400' : ''}`}>
+                    <td className={`${cadastroListClasses.td} text-center tabular-nums`}>
+                      {l.colaboradores.toLocaleString('pt-BR')}
+                    </td>
+                    <td
+                      className={`whitespace-nowrap px-3 py-4 text-right text-sm font-medium tabular-nums sm:px-6 ${
+                        l.resultado < 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-gray-100'
+                      }`}
+                    >
                       {moeda(l.resultado)}
                     </td>
-                    <td className="px-4 py-3.5">
-                      <div className="flex items-center gap-3">
-                        <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700">
+                    <td className="px-3 py-4 sm:px-6">
+                      <div className="flex min-w-[160px] items-center gap-3">
+                        <div className="h-2 flex-1 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700">
                           <div
                             className="h-full rounded-full bg-red-500"
                             style={{ width: `${Math.min(100, (Math.abs(l.resultado) / maior) * 100)}%` }}
                           />
                         </div>
-                        <span className="w-14 text-right text-sm font-medium tabular-nums text-gray-600 dark:text-gray-300">
+                        <span className="w-14 text-right text-sm tabular-nums text-gray-600 dark:text-gray-300">
                           {l.pct.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%
                         </span>
                       </div>
                     </td>
                   </tr>
-                  {aberta ? (
-                    <tr className="border-b border-gray-200 dark:border-gray-700">
-                      <td colSpan={4} className="p-0">
-                        <EventosDaLinha eventos={l.eventos} resultado={l.resultado} />
-                      </td>
-                    </tr>
-                  ) : null}
-                </React.Fragment>
-              );
-            })}
+            ))}
           </tbody>
-          <tfoot>
-            <tr className="border-t-2 border-gray-300 bg-gray-50 text-base font-bold text-gray-900 dark:border-gray-600 dark:bg-gray-800/80 dark:text-white">
-              <td className="px-4 py-4">Total geral</td>
-              <td className={`${tdNum} py-4`}>{dados.colaboradores.toLocaleString('pt-BR')}</td>
-              <td className={`${tdNum} py-4`}>{moeda(dados.resultado)}</td>
-              <td className="px-4 py-4 text-right text-sm tabular-nums">{dados.linhas.length ? '100,0%' : '—'}</td>
-            </tr>
-          </tfoot>
         </table>
       </div>
-    </div>
+      <Modal isOpen={detalhe !== null} onClose={() => setAbertaNome(null)} title={detalhe?.nome ?? ''} size="5xl">
+        {detalhe ? (
+          <EventosDaLinha eventos={detalhe.eventos} resultado={detalhe.resultado} colaboradores={detalhe.colaboradores} />
+        ) : null}
+      </Modal>
+    </>
   );
 }
 
@@ -363,10 +466,11 @@ export default function PreviaFolhaPage() {
   const [filtros, setFiltros] = useState<Record<FiltroKey, string[]>>(FILTROS_VAZIOS);
   // Colunas escondidas pelo usuário (null = padrão). Guarda as ESCONDIDAS, para colunas novas do TOTVS aparecerem.
   const [ocultas, setOcultas] = useState<string[] | null>(null);
-  // Aba principal = resumo para a diretoria; "Folha - Base TOTVS" = linhas da consulta.
+  // Aba principal = resumo para a diretoria; "Folha de Pagamento" = linhas da consulta.
   const [aba, setAba] = useState<'resumo' | 'base'>('resumo');
   const [dim, setDim] = useState<DimensaoResumo>('empresa');
   const mesPadraoAplicado = useRef(false);
+  const [filtrosAbertos, setFiltrosAbertos] = useState(false);
   useEffect(() => {
     try {
       const salvo = localStorage.getItem(STORAGE_COLUNAS);
@@ -421,17 +525,36 @@ export default function PreviaFolhaPage() {
 
   const rows = useMemo(() => data?.rows ?? [], [data]);
   const colunas = useMemo(() => montarColunas(rows), [rows]);
+  // Colunas que podem virar coluna da lista (as de segunda linha vão junto da principal).
+  const colunasEscolhiveis = useMemo(() => {
+    const posicao = (c: Coluna) => {
+      const i = COLUNAS_PADRAO.indexOf(normalizarChave(c.key));
+      return i < 0 ? COLUNAS_PADRAO.length : i;
+    };
+    // Matrícula fica de fora: é sempre a primeira coluna e não pode ser escondida.
+    return colunas
+      .filter((c) => !NOMES_EMBUTIDOS.has(normalizarChave(c.key)) && normalizarChave(c.key) !== 'CHAPA')
+      .sort((a, b) => posicao(a) - posicao(b));
+  }, [colunas]);
   const ocultasSet = useMemo(
     () =>
       ocultas
         ? new Set(ocultas)
-        : new Set(colunas.filter((c) => COLUNAS_OCULTAS_PADRAO.has(normalizarChave(c.key))).map((c) => c.key)),
+        : new Set(colunas.filter((c) => !COLUNAS_PADRAO.includes(normalizarChave(c.key))).map((c) => c.key)),
     [ocultas, colunas]
   );
-  const colunasVisiveis = useMemo(() => colunas.filter((c) => !ocultasSet.has(c.key)), [colunas, ocultasSet]);
+  const colunasVisiveis = useMemo(
+    () => [
+      ...colunas.filter((c) => normalizarChave(c.key) === 'CHAPA'),
+      ...colunasEscolhiveis.filter((c) => !ocultasSet.has(c.key)),
+    ],
+    [colunas, colunasEscolhiveis, ocultasSet]
+  );
+  const colunaExtra = (c: Coluna) =>
+    colunas.find((x) => normalizarChave(x.key) === LINHA_DE_BAIXO[normalizarChave(c.key)])?.key;
   const escolherColunas = (visiveis: string[]) => {
     const v = new Set(visiveis);
-    const novas = colunas.filter((c) => !v.has(c.key)).map((c) => c.key);
+    const novas = colunasEscolhiveis.filter((c) => !v.has(c.key)).map((c) => c.key);
     setOcultas(novas);
     try {
       localStorage.setItem(STORAGE_COLUNAS, JSON.stringify(novas));
@@ -546,6 +669,10 @@ export default function PreviaFolhaPage() {
     if (filtradas.length === 0) return;
     setExportando(true);
     try {
+      const paraExportar = colunasVisiveis.flatMap((c) => {
+        const extra = colunas.find((x) => x.key === colunaExtra(c));
+        return extra ? [c, extra] : [c];
+      });
       const hoje = new Date();
       const ymd = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-${String(hoje.getDate()).padStart(2, '0')}`;
       await exportBrandedExcelTable({
@@ -553,17 +680,17 @@ export default function PreviaFolhaPage() {
         subtitle: `Consulta FOLPAG do TOTVS · leitura de ${fmtDataHora(data?.fetchedAt ?? null)}`,
         sheetName: 'Prévia da Folha',
         filename: `Previa-da-folha-${ymd}.xlsx`,
-        columns: colunasVisiveis.map((c) => ({
-          header: c.label,
-          width: Math.min(40, Math.max(12, c.label.length + 4)),
-          align: c.somavel ? 'right' : 'left',
-          ...(c.somavel ? { numFmt: '#,##0.00' } : {}),
+        columns: paraExportar.map((c) => ({
+          header: tituloColuna(c),
+          width: Math.min(40, Math.max(14, tituloColuna(c).length + 4)),
+          align: ehMoeda(c) ? 'right' : 'left',
+          ...(ehMoeda(c) ? { numFmt: '#,##0.00' } : {}),
         })),
         rows: [
           ...filtradas.map((r) =>
-            colunasVisiveis.map((c) => (c.somavel ? numeroDe(r[c.key]) ?? 0 : dataIso(r[c.key]) ?? textoCelula(r[c.key])))
+            paraExportar.map((c) => (ehMoeda(c) ? numeroDe(r[c.key]) ?? 0 : dataIso(r[c.key]) ?? textoCelula(r[c.key])))
           ),
-          colunasVisiveis.map((c, i) => (c.somavel ? totais.get(c.key) ?? 0 : i === 0 ? 'TOTAL' : '')),
+          paraExportar.map((c, i) => (c.somavel ? totais.get(c.key) ?? 0 : i === 0 ? 'TOTAL' : '')),
         ],
       });
     } catch (e) {
@@ -606,7 +733,26 @@ export default function PreviaFolhaPage() {
     (error instanceof Error ? error.message : 'Erro ao carregar a prévia da folha.');
   const primeiraColunaSomavel = colunas.find((c) => c.somavel);
   const atualizandoAgora = atualizar.isPending || !!data?.atualizando;
-
+  const mesOpcoes = (opcoesFiltro.get('mes') ?? []).map((o) => o.value);
+  // Valor da folha de cada mês, respeitando os demais filtros (o próprio mês fica de fora).
+  const totaisPorMes = (() => {
+    const colMes = colunaDoFiltro.get('mes');
+    const colValor = colunas.find((c) => /^valor$/i.test(c.key.trim()))?.key;
+    const out = new Map<string, number>();
+    if (!colMes || !colValor) return out;
+    const outros = FILTROS.filter((f) => f.key !== 'mes' && filtros[f.key].length > 0 && colunaDoFiltro.has(f.key));
+    for (const r of rows) {
+      if (!outros.every((f) => filtros[f.key].includes(valorDoFiltro(f.key, r[colunaDoFiltro.get(f.key)!])))) continue;
+      const mes = valorDoFiltro('mes', r[colMes]);
+      out.set(mes, (out.get(mes) ?? 0) + (numeroDe(r[colValor]) ?? 0));
+    }
+    return out;
+  })();
+  const totalDosMeses = [...totaisPorMes.values()].reduce((s, v) => s + v, 0);
+  const escolherMes = (meses: string[]) => {
+    setFiltros((prev) => ({ ...prev, mes: meses }));
+    setPage(1);
+  };
   return (
     <ProtectedRoute route={ROUTE}>
       <MainLayout userRole="EMPLOYEE" userName={user.name || 'Usuário'} onLogout={handleLogout}>
@@ -616,7 +762,7 @@ export default function PreviaFolhaPage() {
               Prévia da Folha
             </h1>
             <p className="mt-2 w-full text-center text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Consulta da folha no TOTVS — somente leitura
+              Acompanhe os valores da folha de pagamento
             </p>
           </div>
 
@@ -624,7 +770,7 @@ export default function PreviaFolhaPage() {
             {(
               [
                 ['resumo', 'Prévia da Folha'],
-                ['base', 'Folha - Base TOTVS'],
+                ['base', 'Folha de Pagamento'],
               ] as const
             ).map(([id, label]) => (
               <AppUnderlineTabButton
@@ -637,6 +783,38 @@ export default function PreviaFolhaPage() {
               </AppUnderlineTabButton>
             ))}
           </AppUnderlineTabList>
+
+          {mesOpcoes.length > 0 ? (
+            <div className="flex justify-center overflow-x-auto">
+              <AppSegmentedControl aria-label="Mês de referência">
+                {mesOpcoes.map((mes) => (
+                  <AppSegmentedButton
+                    key={mes}
+                    active={filtros.mes.includes(mes)}
+                    onClick={() => escolherMes([mes])}
+                    className="whitespace-nowrap !px-4 !py-2 !text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/60"
+                  >
+                    <span className="flex flex-col items-center leading-tight">
+                      <span>{nomeDoMes(mes)}</span>
+                      <span className="text-xs font-normal tabular-nums opacity-80">
+                        R$ {fmtMoeda(totaisPorMes.get(mes) ?? 0)}
+                      </span>
+                    </span>
+                  </AppSegmentedButton>
+                ))}
+                <AppSegmentedButton
+                  active={filtros.mes.length === 0}
+                  onClick={() => escolherMes([])}
+                  className="whitespace-nowrap !px-4 !py-2 !text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/60"
+                >
+                  <span className="flex flex-col items-center leading-tight">
+                    <span>Todos</span>
+                    <span className="text-xs font-normal tabular-nums opacity-80">R$ {fmtMoeda(totalDosMeses)}</span>
+                  </span>
+                </AppSegmentedButton>
+              </AppSegmentedControl>
+            </div>
+          ) : null}
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3">
             {aba === 'resumo' ? (
@@ -669,7 +847,7 @@ export default function PreviaFolhaPage() {
               loading={isLoading}
             />
             <FilterStatCard
-              label={primeiraColunaSomavel ? `Total — ${primeiraColunaSomavel.label}` : 'Total'}
+              label="Valor Total"
               count={primeiraColunaSomavel ? `R$ ${fmtMoeda(totais.get(primeiraColunaSomavel.key) ?? 0)}` : '—'}
               icon={Wallet}
               iconBg="bg-emerald-50 dark:bg-emerald-950/40"
@@ -679,7 +857,7 @@ export default function PreviaFolhaPage() {
               </>
             )}
             <FilterStatCard
-              label="Última leitura do TOTVS"
+              label="Última leitura"
               count={fmtDataHora(data?.fetchedAt ?? null)}
               icon={Clock}
               iconBg="bg-amber-50 dark:bg-amber-950/40"
@@ -687,15 +865,6 @@ export default function PreviaFolhaPage() {
               loading={isLoading}
             />
           </div>
-
-          {data?.fetchedAt ? (
-            <p className="text-center text-xs text-gray-500 dark:text-gray-400">
-              {data.trigger === 'manual'
-                ? `Atualizada pelo botão${data.fetchedByName ? ` por ${data.fetchedByName}` : ''}`
-                : 'Leitura automática da madrugada (03:30)'}{' '}
-              · o TOTVS é consultado só às 03:30 ou pelo botão Atualizar
-            </p>
-          ) : null}
 
           {data?.lastError ? (
             <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
@@ -714,195 +883,113 @@ export default function PreviaFolhaPage() {
             </div>
           ) : null}
 
+          {aba === 'resumo' && rows.length > 0 ? (
+            <AppUnderlineTabList aria-label="Agrupamento do resumo">
+              {DIMENSOES.map((d) => (
+                <AppUnderlineTabButton
+                  key={d.key}
+                  active={dim === d.key}
+                  onClick={() => setDim(d.key)}
+                  className="whitespace-nowrap px-3 py-2.5 text-sm sm:px-4"
+                >
+                  {d.key === 'empresa' ? 'Por Empresa' : d.key === 'polo' ? 'Por Polo' : 'Por Centro de Custo'}
+                </AppUnderlineTabButton>
+              ))}
+            </AppUnderlineTabList>
+          ) : null}
+
           <Card className={cadastroListClasses.card}>
             <CardHeader className={cadastroListClasses.cardHeader}>
               <div className={cadastroListClasses.cardHeaderRow}>
                 <div className={cadastroListClasses.cardHeaderIconRow}>
-                  <div className="rounded-lg bg-red-50 p-2 sm:p-3 dark:bg-red-950/40">
-                    <Wallet className="h-5 w-5 text-red-600 sm:h-6 sm:w-6 dark:text-red-400" aria-hidden />
+                  <div className="rounded-lg bg-red-100 p-2 dark:bg-red-900/30 sm:p-3">
+                    <Wallet className="h-5 w-5 text-red-600 dark:text-red-300 sm:h-6 sm:w-6" aria-hidden />
                   </div>
                   <div className="min-w-0">
-                    <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 sm:text-lg">
-                      {aba === 'resumo' ? DIMENSOES.find((d) => d.key === dim)?.aba : 'Folha - Base TOTVS'}
-                    </h3>
+                    <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 sm:text-xl">
+                      {aba === 'resumo' ? DIMENSOES.find((d) => d.key === dim)?.aba : 'Folha de Pagamento'}
+                    </h2>
                     <p className="text-sm text-gray-500 dark:text-gray-400">
-                      {aba === 'resumo'
-                        ? 'Resultado da folha = proventos + descontos de todos os eventos'
-                        : `${filtradas.length.toLocaleString('pt-BR')} registro(s)`}
+                      {aba === 'resumo' ? 'Resultado da folha por empresa, polo e centro de custo' : 'Lançamentos da folha por funcionário'}
                     </p>
                   </div>
                 </div>
                 <div className={cadastroListClasses.cardToolbar}>
-                  <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap">
-                    {aba === 'base' ? (
-                      <>
-                    <div className="relative h-10 min-w-0 flex-1 sm:w-72">
-                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-                      <input
-                        type="search"
-                        value={busca}
-                        onChange={(e) => {
-                          setBusca(e.target.value);
-                          setPage(1);
-                        }}
-                        placeholder="Buscar em qualquer coluna..."
-                        className="box-border h-full w-full rounded-lg border border-gray-300 bg-white py-0 pl-9 pr-9 text-sm font-medium leading-10 text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                      />
-                      {busca ? (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setBusca('');
-                            setPage(1);
-                          }}
-                          aria-label="Limpar busca"
-                          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
-                      ) : null}
-                    </div>
-                    {colunas.length > 0 ? (
-                      <div className="w-48 shrink-0" title="Escolha as colunas que aparecem na tabela e no Excel">
-                        <MultiSelectSearchDropdown
-                          options={colunas.map((c) => ({ value: c.key, label: c.label }))}
-                          selected={colunasVisiveis.map((c) => c.key)}
-                          onChange={escolherColunas}
-                          icon={<Columns3 className="h-4 w-4" />}
-                          placeholder="Nenhuma coluna"
-                          searchPlaceholder="Pesquisar coluna..."
-                          emptySearchMessage="Nenhuma coluna encontrada."
-                          listMaxHeight={360}
-                          menuMinWidth={260}
-                          noFocusRing
-                        />
-                      </div>
-                    ) : null}
-                      </>
-                    ) : null}
-                    <button
-                      type="button"
-                      onClick={() => void (aba === 'resumo' ? exportarResumo() : exportarExcel())}
-                      disabled={exportando || porFiltros.length === 0}
-                      className="inline-flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-                      title="Exportar para Excel"
-                    >
-                      {exportando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                      Excel
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => atualizar.mutate()}
-                      disabled={atualizandoAgora}
-                      className="inline-flex h-10 items-center gap-2 rounded-lg bg-red-600 px-3 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60"
-                      title="Consulta a folha no TOTVS agora (somente leitura)"
-                    >
-                      <RefreshCw className={`h-4 w-4 ${atualizandoAgora ? 'animate-spin' : ''}`} />
-                      {atualizandoAgora ? 'Consultando...' : 'Atualizar'}
-                    </button>
+                  <div className="relative min-w-0 w-full flex-1 basis-full sm:w-[300px] sm:min-w-[240px] sm:flex-none sm:basis-auto">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                    <input
+                      value={busca}
+                      onChange={(e) => {
+                        setBusca(e.target.value);
+                        setPage(1);
+                      }}
+                      placeholder={aba === 'resumo' ? 'Buscar na lista…' : 'Buscar em qualquer coluna…'}
+                      className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                    />
                   </div>
+                  {aba === 'base' && colunas.length > 0 ? (
+                    <div className="shrink-0" title="Escolha as colunas que aparecem na tabela e no Excel">
+                      <MultiSelectSearchDropdown
+                        iconOnly
+                        options={colunasEscolhiveis.map((c) => ({ value: c.key, label: tituloColuna(c) }))}
+                        selected={colunasVisiveis.filter((c) => normalizarChave(c.key) !== 'CHAPA').map((c) => c.key)}
+                        onChange={escolherColunas}
+                        icon={<Columns3 className="h-4 w-4" />}
+                        placeholder="Colunas visíveis"
+                        searchPlaceholder="Pesquisar coluna..."
+                        emptySearchMessage="Nenhuma coluna encontrada."
+                        listMaxHeight={360}
+                        menuMinWidth={260}
+                        noFocusRing
+                      />
+                    </div>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => setFiltrosAbertos(true)}
+                    className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                      filtrosAtivos
+                        ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
+                        : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+                    }`}
+                    aria-label="Abrir filtro"
+                    title={filtrosAtivos ? 'Filtro (ativo)' : 'Filtro'}
+                  >
+                    <Filter className="h-4 w-4" />
+                    {filtrosAtivos ? (
+                      <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
+                    ) : null}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void (aba === 'resumo' ? exportarResumo() : exportarExcel())}
+                    disabled={exportando || porFiltros.length === 0}
+                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                    aria-label="Exportar Excel"
+                    title="Exportar Excel"
+                  >
+                    {exportando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => atualizar.mutate()}
+                    disabled={atualizandoAgora}
+                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-red-200 bg-red-50 text-red-700 transition-colors hover:bg-red-100 disabled:opacity-60 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                    title={atualizandoAgora ? 'Consultando...' : 'Atualizar'}
+                    aria-label="Atualizar"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${atualizandoAgora ? 'animate-spin' : ''}`} />
+                  </button>
                 </div>
               </div>
             </CardHeader>
             <CardContent className={cadastroListClasses.cardContent}>
-              {aba === 'resumo' && rows.length > 0 ? (
-                <div className="mb-5 flex justify-center">
-                  <AppSegmentedControl aria-label="Agrupamento do resumo">
-                    {DIMENSOES.map((d) => (
-                      <AppSegmentedButton
-                        key={d.key}
-                        active={dim === d.key}
-                        onClick={() => setDim(d.key)}
-                        className="!px-4 !py-2 !text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/60 sm:!text-base"
-                      >
-                        {d.aba}
-                      </AppSegmentedButton>
-                    ))}
-                  </AppSegmentedControl>
-                </div>
-              ) : null}
-              <div className={aba === 'resumo' ? 'grid items-start gap-5 lg:grid-cols-[300px_minmax(0,1fr)]' : ''}>
-              {colunaDoFiltro.size > 0 && rows.length > 0 ? (
-                <div
-                  className={`rounded-xl border border-gray-200 bg-gray-50/70 p-4 dark:border-gray-700 dark:bg-gray-800/40 ${
-                    aba === 'resumo' ? 'lg:sticky lg:top-4' : 'mb-5'
-                  }`}
-                >
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2 text-sm font-semibold text-gray-800 dark:text-gray-100">
-                      <ListFilter className="h-4 w-4 text-red-600 dark:text-red-400" />
-                      Filtros
-                    </div>
-                    {filtrosAtivos ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setFiltros(FILTROS_VAZIOS);
-                          setPage(1);
-                        }}
-                        className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm font-medium text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950/40"
-                      >
-                        <X className="h-4 w-4" />
-                        Limpar filtros
-                      </button>
-                    ) : null}
-                  </div>
-                  <div
-                    className={`grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2 ${aba === 'resumo' ? 'lg:grid-cols-1' : 'lg:grid-cols-3 xl:grid-cols-6'}`}
-                  >
-                    {FILTROS.filter((f) => colunaDoFiltro.has(f.key)).map((f) => (
-                      <div key={f.key} className="min-w-0">
-                        <span className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">{f.label}</span>
-                        <MultiSelectSearchDropdown
-                          options={opcoesFiltro.get(f.key) ?? []}
-                          selected={filtros[f.key]}
-                          onChange={(valores) => {
-                            setFiltros((prev) => ({ ...prev, [f.key]: valores }));
-                            setPage(1);
-                          }}
-                          placeholder={f.todos}
-                          searchPlaceholder={`Pesquisar ${f.label.toLowerCase()}...`}
-                          emptyOptionsMessage="Nenhuma opção."
-                          emptySearchMessage="Nada encontrado."
-                          listMaxHeight={320}
-                          noFocusRing
-                        />
-                      </div>
-                    ))}
-                  </div>
-                  {filtrosAtivos ? (
-                    <div className="mt-3 flex flex-wrap gap-2 border-t border-gray-200 pt-3 dark:border-gray-700">
-                      {FILTROS.filter((f) => filtros[f.key].length > 0).map((f) => (
-                        <span
-                          key={f.key}
-                          className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-red-200 bg-red-50 py-1 pl-3 pr-1.5 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200"
-                          title={filtros[f.key].join(', ')}
-                        >
-                          <span className="font-semibold">{f.label}:</span>
-                          <span className="truncate">
-                            {filtros[f.key].length > 3
-                              ? `${filtros[f.key].slice(0, 3).join(', ')} +${filtros[f.key].length - 3}`
-                              : filtros[f.key].join(', ')}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setFiltros((prev) => ({ ...prev, [f.key]: [] }));
-                              setPage(1);
-                            }}
-                            aria-label={`Remover filtro ${f.label}`}
-                            className="rounded-full p-0.5 hover:bg-red-100 dark:hover:bg-red-900/50"
-                          >
-                            <X className="h-3.5 w-3.5" />
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
               {aba === 'resumo' && !isLoading && porFiltros.length > 0 ? (
-                <ResumoFolhaTabela dados={resumo[dim]} coluna={DIMENSOES.find((d) => d.key === dim)?.coluna ?? ''} />
+                <ResumoFolhaTabela
+                  dados={resumo[dim]}
+                  coluna={DIMENSOES.find((d) => d.key === dim)?.coluna ?? ''}
+                  busca={busca}
+                />
               ) : isLoading ? (
                 <CadastroListLoading message="Carregando prévia da folha..." />
               ) : filtradas.length === 0 ? (
@@ -927,18 +1014,19 @@ export default function PreviaFolhaPage() {
                     totalPages={range.totalPages}
                   />
                   <div className={cadastroListClasses.tableScroll}>
-                    <table className={cadastroListClasses.table}>
-                      <thead>
+                    <table className={cadastroListClasses.table} data-cc-skip-column-customizer="1">
+                      <thead className="border-b border-gray-200 dark:border-gray-700">
                         <tr>
                           {colunasVisiveis.map((c) => (
                             <th
                               key={c.key}
-                              className={`${c.somavel ? 'text-right' : 'text-left'} cursor-pointer select-none whitespace-nowrap px-3 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white`}
+                              className={`${cadastroListClasses.th} ${alinhamento(c)} cursor-pointer select-none whitespace-nowrap`}
+                              style={normalizarChave(c.key) === 'CHAPA' ? { width: '5rem' } : undefined}
                               onClick={() => alternarOrdem(c.key)}
                               title="Ordenar"
                             >
                               <span className="inline-flex items-center gap-1">
-                                {c.label}
+                                {tituloColuna(c)}
                                 {ordem?.key === c.key ? (
                                   ordem.dir === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
                                 ) : null}
@@ -947,15 +1035,15 @@ export default function PreviaFolhaPage() {
                           ))}
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                      <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
                         {pagina.map((r, i) => (
-                          <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-800/60">
+                          <tr key={i} className={getListTableRowClassName(false)}>
                             {colunasVisiveis.map((c) => (
                               <td
                                 key={c.key}
-                                className={`whitespace-nowrap px-3 py-2 text-sm text-gray-800 dark:text-gray-200 ${c.somavel ? 'text-right tabular-nums' : ''}`}
+                                className={`${normalizarChave(c.key) === 'CHAPA' ? cadastroListClasses.tdMono : cadastroListClasses.td} ${alinhamento(c)} ${ehMoeda(c) ? 'whitespace-nowrap' : ''}`}
                               >
-                                {exibirCelula(c, r[c.key]) || <span className="text-gray-400">—</span>}
+                                <CelulaFolha coluna={c} linha={r} extra={colunaExtra(c)} />
                               </td>
                             ))}
                           </tr>
@@ -963,13 +1051,13 @@ export default function PreviaFolhaPage() {
                       </tbody>
                       {totais.size > 0 ? (
                         <tfoot>
-                          <tr className="border-t-2 border-gray-300 bg-gray-50 font-semibold dark:border-gray-600 dark:bg-gray-800/80">
+                          <tr className="border-t border-gray-200 font-semibold dark:border-gray-700">
                             {colunasVisiveis.map((c, i) => (
                               <td
                                 key={c.key}
-                                className={`whitespace-nowrap px-3 py-2 text-sm text-gray-900 dark:text-gray-100 ${c.somavel ? 'text-right tabular-nums' : ''}`}
+                                className={`whitespace-nowrap px-3 py-4 text-sm text-gray-900 dark:text-gray-100 sm:px-6 ${c.somavel ? 'text-right tabular-nums' : ''}`}
                               >
-                                {c.somavel ? fmtMoeda(totais.get(c.key) ?? 0) : i === 0 ? 'Total (filtro atual)' : ''}
+                                {c.somavel ? `R$ ${fmtMoeda(totais.get(c.key) ?? 0)}` : i === 1 ? 'Total (filtro atual)' : ''}
                               </td>
                             ))}
                           </tr>
@@ -980,9 +1068,56 @@ export default function PreviaFolhaPage() {
                   <ListPagination currentPage={currentPage} totalPages={range.totalPages} onPageChange={setPage} />
                 </>
               )}
-              </div>
             </CardContent>
           </Card>
+
+          <Modal
+            isOpen={filtrosAbertos}
+            onClose={() => setFiltrosAbertos(false)}
+            title="Filtros — Prévia da Folha"
+            size="md"
+          >
+            <div className="space-y-4">
+              {FILTROS.filter((f) => colunaDoFiltro.has(f.key)).map((f) => (
+                <div key={f.key} className="min-w-0">
+                  <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">{f.label}</label>
+                  <MultiSelectSearchDropdown
+                    options={opcoesFiltro.get(f.key) ?? []}
+                    selected={filtros[f.key]}
+                    onChange={(valores) => {
+                      setFiltros((prev) => ({ ...prev, [f.key]: valores }));
+                      setPage(1);
+                    }}
+                    placeholder={f.todos}
+                    searchPlaceholder={`Pesquisar ${f.label.toLowerCase()}...`}
+                    emptyOptionsMessage="Nenhuma opção."
+                    emptySearchMessage="Nada encontrado."
+                    listMaxHeight={320}
+                    noFocusRing
+                  />
+                </div>
+              ))}
+              <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFiltros(FILTROS_VAZIOS);
+                    setPage(1);
+                  }}
+                  className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                >
+                  Limpar filtros
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFiltrosAbertos(false)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                >
+                  Aplicar
+                </button>
+              </div>
+            </div>
+          </Modal>
         </div>
       </MainLayout>
     </ProtectedRoute>

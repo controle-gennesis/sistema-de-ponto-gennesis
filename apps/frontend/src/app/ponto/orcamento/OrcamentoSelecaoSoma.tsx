@@ -25,6 +25,7 @@ const COLUNAS_NUMERICAS: Record<string, TipoColuna> = {
   total: 'moeda',
   totalDesc: 'moeda',
   totalBdi: 'moeda',
+  totalBdiDesc: 'moeda',
   peso: 'pct',
 };
 

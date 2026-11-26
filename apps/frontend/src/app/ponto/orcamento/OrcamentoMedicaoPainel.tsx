@@ -293,23 +293,15 @@ function celulasCantoFaixa(raiz: HTMLElement, faixa: FaixaMedicao): HTMLElement[
   return els;
 }
 
-/** Balão com a soma das células numéricas selecionadas (como a barra de status do Excel). */
-function TooltipSomaSelecao({
+/** Botão «Mesclar células» junto da seleção de Descrição/Detalhes. */
+function BotaoMesclarSelecao({
   raiz,
   faixa,
-  soma,
-  media,
-  qtd,
   onMesclar,
 }: {
   raiz: HTMLElement | null;
   faixa: FaixaMedicao;
-  /** Sem números na seleção (só texto): o balão mostra apenas o botão de mesclar. */
-  soma?: number;
-  media?: number;
-  qtd?: number;
-  /** Só existe quando a seleção é de Descrição/Detalhes em 2+ linhas: mostra o botão Mesclar. */
-  onMesclar?: () => void;
+  onMesclar: () => void;
 }) {
   const [pos, setPos] = useState<{ right: number; top: number } | null>(null);
   useLayoutEffect(() => {
@@ -350,34 +342,17 @@ function TooltipSomaSelecao({
     >
       <div
         data-soma-tooltip
-        className="flex items-center gap-3 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs tabular-nums text-gray-600 shadow-lg dark:border-gray-600 dark:bg-gray-900 dark:text-gray-300"
+        className="rounded-md border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-600 dark:bg-gray-900"
       >
-        {soma !== undefined && media !== undefined && qtd !== undefined ? (
-          <>
-        <span>
-          Soma: <strong className="text-sm font-bold text-gray-900 dark:text-gray-100">{formatMedicaoCampo(soma)}</strong>
-        </span>
-        <span className="text-gray-300 dark:text-gray-600">|</span>
-        <span>
-          Média: <strong className="font-semibold text-gray-800 dark:text-gray-200">{formatMedicaoCampo(media)}</strong>
-        </span>
-        <span className="text-gray-300 dark:text-gray-600">|</span>
-        <span>
-          Células: <strong className="font-semibold text-gray-800 dark:text-gray-200">{qtd}</strong>
-        </span>
-          </>
-        ) : null}
-        {onMesclar ? (
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={onMesclar}
-            className="pointer-events-auto inline-flex items-center gap-1.5 rounded-md bg-red-600 px-2.5 py-1 text-xs font-semibold text-white transition-colors hover:bg-red-700"
-          >
-            <Merge className="h-3.5 w-3.5" aria-hidden />
-            Mesclar células
-          </button>
-        ) : null}
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={onMesclar}
+          className="pointer-events-auto inline-flex items-center gap-1.5 rounded-md bg-red-600 px-2.5 py-1 text-xs font-semibold text-white transition-colors hover:bg-red-700"
+        >
+          <Merge className="h-3.5 w-3.5" aria-hidden />
+          Mesclar células
+        </button>
       </div>
     </div>,
     document.body
@@ -2957,49 +2932,6 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
   const selecaoVisivel = faixaVisivel(selecao);
   const extrasVisiveis = selecaoExtras.map(faixaVisivel).filter((f): f is FaixaMedicao => f != null);
   /** Regiões consideradas na tooltip: a seleção (com as extras do Ctrl) ou, sem seleção, a célula ativa. */
-  const faixasResumo: FaixaMedicao[] = selecaoVisivel
-    ? [...extrasVisiveis, selecaoVisivel]
-    : celulaAtiva
-      ? [faixaVisivel({ idxIni: celulaAtiva.idx, idxFim: celulaAtiva.idx, colIni: celulaAtiva.col, colFim: celulaAtiva.col })].filter(
-          (f): f is FaixaMedicao => f != null
-        )
-      : [];
-  /** Soma/média das células numéricas marcadas (aparece já com uma célula). */
-  const resumoSelecao = (() => {
-    if (!faixasResumo.length) return null;
-    let soma = 0;
-    let celulas = 0;
-    let preenchidas = 0;
-    const vistas = new Set<string>();
-    for (const f of faixasResumo)
-    for (let i = f.idxIni; i <= f.idxFim; i += 1) {
-      const ln = linhasEfetivas[i];
-      if (!ln || ln.cabecalhoSecao) continue;
-      for (let c = f.colIni; c <= f.colFim; c += 1) {
-        const col = COLUNAS_MEDICAO[c];
-        if (!col || col === 'descricao' || col === 'detalhes') continue;
-        const chave = `${i}|${c}`;
-        if (vistas.has(chave)) continue;
-        vistas.add(chave);
-        const v =
-          col === 'C' || col === 'L' || col === 'H' || col === 'N'
-            ? Number(ln[col]) || 0
-            : col === 'empol'
-              ? Number(ln.empolamento) || 0
-              : col === 'A'
-                ? areaExibidaLinha(ln)
-                : col === 'V'
-                  ? volumeExibidoLinha(ln, tipo)
-                  : calcularQuantidadeLinha(ln, tipo);
-        celulas += 1;
-        if (Number.isFinite(v) && v !== 0) {
-          soma += v;
-          preenchidas += 1;
-        }
-      }
-    }
-    return celulas >= 1 ? { soma, media: preenchidas ? soma / preenchidas : 0, qtd: preenchidas } : null;
-  })();
   const copiaVisivel = copiaCelula?.rowKey === rowKey ? faixaVisivel(copiaCelula.faixa) : null;
 
   const alcaCabecalho = (linha: number, col: number) =>
@@ -4497,15 +4429,8 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
         {body}
       </div>
       {readOnly ? null : portalMenuCtxMedicao}
-      {faixasResumo.length > 0 && (resumoSelecao || (mesclaPossivel && !readOnly)) ? (
-        <TooltipSomaSelecao
-          raiz={tabelaWrapRef.current}
-          faixa={mesclaPossivel && !resumoSelecao ? mesclaPossivel : faixasResumo[faixasResumo.length - 1]!}
-          soma={resumoSelecao?.soma}
-          media={resumoSelecao?.media}
-          qtd={resumoSelecao?.qtd}
-          onMesclar={readOnly || !mesclaPossivel ? undefined : mesclarCelulasSelecao}
-        />
+      {mesclaPossivel && !readOnly ? (
+        <BotaoMesclarSelecao raiz={tabelaWrapRef.current} faixa={mesclaPossivel} onMesclar={mesclarCelulasSelecao} />
       ) : null}
       {modalMemoriasAberto && onMemoriasIncluidasChange ? (
         <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">

@@ -20,9 +20,9 @@ export type ResumoDimensao = { linhas: LinhaResumo[]; colaboradores: number; res
 export type ResumoFolha = Record<DimensaoResumo, ResumoDimensao>;
 
 export const DIMENSOES: { key: DimensaoResumo; aba: string; coluna: string }[] = [
-  { key: 'empresa', aba: 'Resultado por empresa', coluna: 'Empresa' },
-  { key: 'polo', aba: 'Resultado por polo', coluna: 'Polo' },
-  { key: 'cc', aba: 'Resultado por centro de custo', coluna: 'Centro de custo' },
+  { key: 'empresa', aba: 'Resultado por Empresa', coluna: 'Empresa' },
+  { key: 'polo', aba: 'Resultado por Polo', coluna: 'Polo' },
+  { key: 'cc', aba: 'Resultado por Centro de Custo', coluna: 'Centro de custo' },
 ];
 
 export type ChavesResumo = {
