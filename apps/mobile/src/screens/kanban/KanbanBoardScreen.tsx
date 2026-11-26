@@ -747,7 +747,7 @@ export default function KanbanBoardScreen() {
     if (!title || !addColId) return;
     setSaving(true);
     try {
-      await createKanbanCard({ columnId: addColId, title, insertAt: 'bottom' });
+      await createKanbanCard({ columnId: addColId, title, insertAt: 'top' });
       setNewTitle('');
       setAddColId(null);
       await queryClient.invalidateQueries({

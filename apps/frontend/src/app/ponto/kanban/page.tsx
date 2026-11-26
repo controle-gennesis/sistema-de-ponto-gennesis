@@ -2060,7 +2060,7 @@ function KanbanColumnComponent({
         {!readOnly && !isChecklistView && (
           <button
             type="button"
-            onClick={() => onAddCard(column.id, 'bottom')}
+            onClick={() => onAddCard(column.id, 'top')}
             className={clsx(
               'flex w-full items-center gap-2 rounded-xl px-2 py-2.5 text-left text-sm font-medium transition-colors',
               'text-gray-500 hover:bg-white/80 hover:text-gray-800',
@@ -2078,7 +2078,7 @@ function KanbanColumnComponent({
         <div className="shrink-0 px-3 pb-3 pt-1">
           <button
             type="button"
-            onClick={() => onAddCard(column.id, 'bottom')}
+            onClick={() => onAddCard(column.id, 'top')}
             className={clsx(
               'flex w-full items-center gap-2 rounded-xl px-2 py-2.5 text-left text-sm font-medium transition-colors',
               'text-gray-500 hover:bg-white/80 hover:text-gray-800',
