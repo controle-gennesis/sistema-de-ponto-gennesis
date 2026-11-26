@@ -37,6 +37,9 @@ export type KanbanCard = {
   workHours?: number | null;
   coverColor?: string | null;
   coverSize?: 'NORMAL' | 'FULL';
+  /** Foto de capa (substitui a cor): imagem grande e miniatura usada no quadro. */
+  coverImageUrl?: string | null;
+  coverThumbUrl?: string | null;
   createdAt: string;
   completedAt?: string | null;
   checklistItems?: KanbanChecklistItem[];
@@ -234,6 +237,23 @@ export async function updateKanbanCard(
   },
 ): Promise<KanbanCard> {
   const res = await api.patch(`/api/kanban/cards/${id}`, payload);
+  return readApiData<KanbanCard>(res);
+}
+
+export async function uploadKanbanCardCover(
+  cardId: string,
+  imageUri: string,
+  thumbUri: string,
+): Promise<KanbanCard> {
+  const form = new FormData();
+  form.append('image', { uri: imageUri, name: 'capa.jpg', type: 'image/jpeg' } as any);
+  form.append('thumb', { uri: thumbUri, name: 'capa-mini.jpg', type: 'image/jpeg' } as any);
+  const res = await api.post(`/api/kanban/cards/${cardId}/cover`, form);
+  return readApiData<KanbanCard>(res);
+}
+
+export async function removeKanbanCardCover(cardId: string): Promise<KanbanCard> {
+  const res = await api.delete(`/api/kanban/cards/${cardId}/cover`);
   return readApiData<KanbanCard>(res);
 }
 

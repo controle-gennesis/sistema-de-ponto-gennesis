@@ -8,6 +8,7 @@ import {
   ScrollView,
   TextInput,
   Modal,
+  Image,
   ActivityIndicator,
   Dimensions,
   Platform,
@@ -62,6 +63,7 @@ import {
   type KanbanColumn,
   type Priority,
 } from '../../services/kanban';
+import { resolveMediaUrl } from '../../utils/resolveMediaUrl';
 import type { RootStackParamList } from '../../../App';
 
 const COL_WIDTH = Math.min(300, Dimensions.get('window').width * 0.78);
@@ -294,14 +296,18 @@ function BoardCardBase({
   const priority = card.priority || 'medium';
   const priorityCfg = PRIORITY_CONFIG[priority] || PRIORITY_CONFIG.medium;
   const mutedBar = isDark ? '#4b5563' : '#d1d5db';
-  const fullCover = !!coverHex(card.coverColor) && normalizeCoverSize(card.coverSize) === 'FULL';
+  const coverImageUri = resolveMediaUrl(card.coverThumbUrl);
+  const coverIsFullSize = normalizeCoverSize(card.coverSize) === 'FULL';
+  const fullCover = (!!coverImageUri || !!coverHex(card.coverColor)) && coverIsFullSize;
   const divider = fullCover ? 'rgba(255,255,255,0.35)' : isDark ? 'rgba(75,85,99,0.75)' : '#f3f4f6';
   const metaColor = fullCover ? 'rgba(255,255,255,0.92)' : isDark ? '#d1d5db' : '#4b5563';
   const softColor = fullCover ? 'rgba(255,255,255,0.92)' : isDark ? '#9ca3af' : '#6b7280';
   const isCompleted = Boolean(card.completedAt);
-  const coverColorHex = coverHex(card.coverColor);
-  const coverFull = !!coverColorHex && normalizeCoverSize(card.coverSize) === 'FULL';
+  const coverColorHex = coverImageUri ? null : coverHex(card.coverColor);
+  const coverFull = fullCover;
   const coverStrip = !!coverColorHex && !coverFull;
+  const photoStrip = !!coverImageUri && !coverIsFullSize;
+  const photoFull = !!coverImageUri && coverIsFullSize;
   const titleColor = coverFull
     ? '#ffffff'
     : isCompleted
@@ -315,6 +321,7 @@ function BoardCardBase({
       style={[
         styles.card,
         coverFull && coverColorHex ? { backgroundColor: coverColorHex, borderColor: coverColorHex } : null,
+        photoFull ? { minHeight: 170, justifyContent: 'flex-end' } : null,
         presence && presence.length > 0 ? { borderColor: presence[0].color, borderWidth: 2 } : null,
       ]}
       onPress={() => {
@@ -326,6 +333,24 @@ function BoardCardBase({
       }}
       activeOpacity={0.82}
     >
+      {photoStrip ? (
+        <Image
+          source={{ uri: coverImageUri }}
+          style={{ height: 130, marginHorizontal: -14, marginTop: -14, marginBottom: 10, borderTopLeftRadius: 15, borderTopRightRadius: 15 }}
+          resizeMode="cover"
+        />
+      ) : null}
+      {photoFull ? (
+        <>
+          <Image
+            source={{ uri: coverImageUri }}
+            style={[StyleSheet.absoluteFill, { borderRadius: 15 }]}
+            resizeMode="cover"
+          />
+          {/* Escurece a foto para o título continuar legível. */}
+          <View style={[StyleSheet.absoluteFill, { borderRadius: 15, backgroundColor: 'rgba(0,0,0,0.5)' }]} />
+        </>
+      ) : null}
       {coverStrip ? (
         <View style={{ height: 34, backgroundColor: coverColorHex ?? undefined, marginHorizontal: -14, marginTop: -14, marginBottom: 10, borderTopLeftRadius: 15, borderTopRightRadius: 15 }} />
       ) : null}

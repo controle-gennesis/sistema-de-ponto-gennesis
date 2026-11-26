@@ -1,6 +1,17 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Check } from 'lucide-react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
+import { Camera, Check, ImagePlus } from 'lucide-react-native';
 import SheetModal, { SheetPrimaryButton } from './SheetModal';
 import FormFieldLabel from './FormFieldLabel';
 import { useTheme } from '../context/ThemeContext';
@@ -17,15 +28,33 @@ type Props = {
   coverColor?: string | null;
   coverSize?: string | null;
   onSave: (coverColor: string | null, coverSize: CoverSize) => Promise<void> | void;
+  /** Miniatura da foto de capa atual (URL completa). */
+  imageUri?: string | null;
+  /** Imagens já anexadas ao card, que podem virar capa. */
+  attachmentImages?: Array<{ id: string; fileName: string; uri: string }>;
+  /** Envia a foto escolhida (arquivo do aparelho ou URL de um anexo). */
+  onPickImage?: (uri: string) => Promise<void>;
+  onRemoveImage?: () => Promise<void>;
 };
 
-/** "Capa do card" no padrão de formulário: cor, tamanho e botão principal. */
-export default function KanbanCoverSheet({ visible, onClose, coverColor, coverSize, onSave }: Props) {
+/** "Capa do card" no padrão de formulário: foto ou cor, tamanho e botão principal. */
+export default function KanbanCoverSheet({
+  visible,
+  onClose,
+  coverColor,
+  coverSize,
+  onSave,
+  imageUri,
+  attachmentImages = [],
+  onPickImage,
+  onRemoveImage,
+}: Props) {
   const { colors, isDark } = useTheme();
   const styles = useMemo(() => getStyles(colors, isDark), [colors, isDark]);
   const [color, setColor] = useState<string | null>(coverColor ?? null);
   const [size, setSize] = useState<CoverSize>(normalizeCoverSize(coverSize));
   const [saving, setSaving] = useState(false);
+  const [sending, setSending] = useState(false);
 
   // Fundo vermelho do seletor de tamanho: desliza entre «Faixa» (0) e «Card inteiro» (1).
   const slide = useRef(new Animated.Value(normalizeCoverSize(coverSize) === 'FULL' ? 1 : 0)).current;
@@ -61,10 +90,103 @@ export default function KanbanCoverSheet({ visible, onClose, coverColor, coverSi
   };
 
   const unchanged = color === (coverColor ?? null) && size === normalizeCoverSize(coverSize);
+  const busy = saving || sending;
+
+  const sendImage = async (uri: string) => {
+    if (!onPickImage) return;
+    setSending(true);
+    try {
+      await onPickImage(uri);
+      // A foto substitui a cor.
+      setColor(null);
+    } catch (e: any) {
+      Alert.alert('Foto de capa', e?.message || 'Não foi possível usar essa imagem');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const pickFrom = async (source: 'library' | 'camera') => {
+    const permission =
+      source === 'camera'
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (permission.status !== 'granted') {
+      Alert.alert(
+        'Permissão',
+        source === 'camera' ? 'Precisamos da câmera para tirar a foto.' : 'Precisamos da galeria para escolher a foto.',
+      );
+      return;
+    }
+    const options: ImagePicker.ImagePickerOptions = {
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.9,
+    };
+    const result =
+      source === 'camera'
+        ? await ImagePicker.launchCameraAsync(options)
+        : await ImagePicker.launchImageLibraryAsync(options);
+    if (result.canceled || !result.assets?.length) return;
+    await sendImage(result.assets[0].uri);
+  };
+
+  const removePhoto = async () => {
+    if (!onRemoveImage) return;
+    setSending(true);
+    try {
+      await onRemoveImage();
+      onClose();
+    } catch (e: any) {
+      Alert.alert('Foto de capa', e?.message || 'Não foi possível remover a capa');
+    } finally {
+      setSending(false);
+    }
+  };
 
   return (
     <SheetModal visible={visible} onClose={onClose} title="Capa">
-      <FormFieldLabel label="Cor" required style={styles.label} />
+      {onPickImage ? (
+        <>
+          <FormFieldLabel label="Foto" style={styles.label} />
+          {imageUri ? <Image source={{ uri: imageUri }} style={styles.preview} resizeMode="cover" /> : null}
+          {sending ? (
+            <View style={styles.sending}>
+              <ActivityIndicator color={colors.primary} />
+              <Text style={styles.photoButtonText}>Salvando foto...</Text>
+            </View>
+          ) : (
+            <View style={styles.photoRow}>
+              <TouchableOpacity style={styles.photoButton} onPress={() => void pickFrom('library')} disabled={busy}>
+                <ImagePlus size={17} color={colors.text} />
+                <Text style={styles.photoButtonText}>Galeria</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.photoButton} onPress={() => void pickFrom('camera')} disabled={busy}>
+                <Camera size={17} color={colors.text} />
+                <Text style={styles.photoButtonText}>Câmera</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          {attachmentImages.length > 0 ? (
+            <>
+              <Text style={styles.hint}>Ou use um anexo do card</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.thumbs}>
+                {attachmentImages.map((att) => (
+                  <TouchableOpacity
+                    key={att.id}
+                    onPress={() => void sendImage(att.uri)}
+                    disabled={busy}
+                    accessibilityLabel={`Usar ${att.fileName} como capa`}
+                  >
+                    <Image source={{ uri: att.uri }} style={styles.thumb} resizeMode="cover" />
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </>
+          ) : null}
+        </>
+      ) : null}
+
+      <FormFieldLabel label="Cor" style={styles.label} />
       <View style={styles.grid}>
         {KANBAN_COVER_COLORS.map((c) => {
           const active = color === c.key;
@@ -129,11 +251,15 @@ export default function KanbanCoverSheet({ visible, onClose, coverColor, coverSi
         <SheetPrimaryButton
           label="Salvar"
           loading={saving}
-          disabled={!color || unchanged}
+          disabled={sending || (!color && !imageUri) || unchanged}
           onPress={() => void save(color, size)}
         />
-        {coverColor ? (
-          <TouchableOpacity style={styles.remove} onPress={() => void save(null, 'NORMAL')} disabled={saving}>
+        {coverColor || imageUri ? (
+          <TouchableOpacity
+            style={styles.remove}
+            onPress={() => void (imageUri ? removePhoto() : save(null, 'NORMAL'))}
+            disabled={busy}
+          >
             <Text style={styles.removeText}>Remover capa</Text>
           </TouchableOpacity>
         ) : null}
@@ -147,6 +273,25 @@ function getStyles(colors: any, isDark: boolean) {
   const fieldBg = isDark ? colors.card : colors.surface;
   return StyleSheet.create({
     label: { fontSize: 13, fontWeight: '600', marginBottom: 8, letterSpacing: -0.1, color: colors.textSecondary },
+    preview: { width: '100%', height: 120, borderRadius: 12, marginBottom: 8 },
+    photoRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },
+    photoButton: {
+      flex: 1,
+      minHeight: 44,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      borderRadius: 12,
+      backgroundColor: fieldBg,
+      borderWidth: StyleSheet.hairlineWidth * 1.5,
+      borderColor: line,
+    },
+    photoButtonText: { fontSize: 14, fontWeight: '600', color: colors.text },
+    sending: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 10 },
+    hint: { fontSize: 12, color: colors.textSecondary, marginBottom: 6 },
+    thumbs: { marginBottom: 12 },
+    thumb: { width: 64, height: 56, borderRadius: 10, marginRight: 8 },
     grid: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -4, marginBottom: 10 },
     cell: { width: '20%', paddingHorizontal: 4, marginBottom: 8 },
     swatch: { height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },

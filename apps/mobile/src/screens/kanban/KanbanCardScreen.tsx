@@ -46,6 +46,8 @@ import AppHeader from '../../components/AppHeader';
 import KanbanMaterialsSheet from '../../components/KanbanMaterialsSheet';
 import KanbanSheet from '../../components/KanbanSheet';
 import KanbanCoverSheet from '../../components/KanbanCoverSheet';
+import { downloadCoverSource, prepareCoverImages } from '../../lib/kanbanCoverImage';
+import { resolveMediaUrl } from '../../utils/resolveMediaUrl';
 import KanbanMoveSheet from '../../components/KanbanMoveSheet';
 import { MemberAvatar, MemberPickerSheet } from '../../components/KanbanMemberUi';
 import { useAuth } from '../../context/AuthContext';
@@ -77,6 +79,8 @@ import {
   updateChecklistItem,
   updateKanbanCard,
   uploadKanbanAttachments,
+  uploadKanbanCardCover,
+  removeKanbanCardCover,
 } from '../../services/kanban';
 import type { RootStackParamList } from '../../../App';
 
@@ -400,6 +404,21 @@ export default function KanbanCardScreen() {
     } catch (e: any) {
       Toast.show({ type: 'error', text1: e?.message || 'Falha ao salvar capa' });
     }
+  };
+
+  /** `uri` é um arquivo do aparelho (galeria/câmera) ou a URL de um anexo. Erros aparecem na janela. */
+  const saveCoverImage = async (uri: string) => {
+    if (!card || readOnly) return;
+    const localUri = /^https?:\/\//i.test(uri) ? await downloadCoverSource(uri) : uri;
+    const { imageUri, thumbUri } = await prepareCoverImages(localUri);
+    await uploadKanbanCardCover(card.id, imageUri, thumbUri);
+    await invalidate();
+  };
+
+  const removeCoverImage = async () => {
+    if (!card || readOnly) return;
+    await removeKanbanCardCover(card.id);
+    await invalidate();
   };
 
   const setPriority = async (priority: Priority) => {
@@ -957,6 +976,13 @@ export default function KanbanCardScreen() {
         keyboardDismissMode="interactive"
         automaticallyAdjustKeyboardInsets
       >
+        {card.coverThumbUrl ? (
+          <Image
+            source={{ uri: resolveMediaUrl(card.coverThumbUrl) }}
+            style={{ width: '100%', height: 150, borderRadius: 14, marginBottom: 12 }}
+            resizeMode="cover"
+          />
+        ) : null}
         <View style={styles.metaRow}>
           <TouchableOpacity
             style={styles.columnChip}
@@ -1109,7 +1135,7 @@ export default function KanbanCardScreen() {
           <ActionButton
             label="Capa"
             icon={Palette}
-            active={!!card.coverColor}
+            active={!!card.coverColor || !!card.coverThumbUrl}
             colors={colors}
             disabled={readOnly}
             onPress={() => setCoverOpen(true)}
@@ -1605,6 +1631,12 @@ export default function KanbanCardScreen() {
         coverColor={card.coverColor}
         coverSize={card.coverSize}
         onSave={saveCover}
+        imageUri={resolveMediaUrl(card.coverThumbUrl) ?? null}
+        attachmentImages={attachments
+          .filter((a) => a.mimeType?.startsWith('image/') && a.fileUrl.startsWith('/uploads'))
+          .map((a) => ({ id: a.id, fileName: a.fileName, uri: resolveMediaUrl(a.fileUrl) ?? '' }))}
+        onPickImage={saveCoverImage}
+        onRemoveImage={removeCoverImage}
       />
 
       <KanbanSheet
