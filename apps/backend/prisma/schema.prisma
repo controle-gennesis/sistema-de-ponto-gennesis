@@ -3773,6 +3773,9 @@ model KanbanCard {
   coverColor         String?
   /// NORMAL = faixa no topo; FULL = cartão inteiro colorido.
   coverSize          String       @default("NORMAL")
+  /// Foto de capa (substitui a cor): imagem grande e miniatura usada no quadro.
+  coverImageUrl      String?
+  coverThumbUrl      String?
   /// Lugar na coluna antes de ser concluído; usado para voltar ao desmarcar.
   positionBeforeDone Int?
   createdAt          DateTime     @default(now())

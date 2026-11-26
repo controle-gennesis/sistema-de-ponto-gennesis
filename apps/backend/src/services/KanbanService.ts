@@ -33,6 +33,7 @@ import {
   type TrelloExportBoard,
 } from '../lib/kanbanTrelloTransfer';
 import { ChatService } from './ChatService';
+import { savePersistentUpload, deletePersistentUpload } from '../lib/persistentUpload';
 
 const chatUploadService = new ChatService();
 
@@ -246,6 +247,8 @@ function formatCard(card: {
   workHours?: { toNumber?: () => number } | number | null;
   coverColor?: string | null;
   coverSize?: string | null;
+  coverImageUrl?: string | null;
+  coverThumbUrl?: string | null;
   assignee?: { id: string; name: string; profilePhotoUrl: string | null } | null;
   members?: Array<{ user: { id: string; name: string; profilePhotoUrl: string | null } }>;
   checklistItems?: Array<{
@@ -294,6 +297,8 @@ function formatCard(card: {
     workHours: card.workHours != null ? Number(card.workHours) : null,
     coverColor: card.coverColor ?? null,
     coverSize: card.coverSize === 'FULL' ? 'FULL' : 'NORMAL',
+    coverImageUrl: card.coverImageUrl ?? null,
+    coverThumbUrl: card.coverThumbUrl ?? null,
     ...(card.checklistItems
       ? { checklistItems: card.checklistItems.map((item) => formatChecklistItem(item)) }
       : {}),
@@ -1353,6 +1358,8 @@ export class KanbanService {
                 workHours: true,
                 coverColor: true,
                 coverSize: true,
+                coverImageUrl: true,
+                coverThumbUrl: true,
                 checklistItems: {
                   orderBy: { position: 'asc' },
                   select: { title: true, isDone: true, dueDate: true },
@@ -1412,6 +1419,8 @@ export class KanbanService {
           workHours: card.workHours,
           coverColor: card.coverColor,
           coverSize: card.coverSize,
+          coverImageUrl: card.coverImageUrl,
+          coverThumbUrl: card.coverThumbUrl,
           completedAt: card.completedAt,
           position: cardIndex,
         });
@@ -2393,6 +2402,9 @@ export class KanbanService {
       ...(data.coverColor !== undefined
         ? { coverColor: normalizeCoverColor(data.coverColor) }
         : {}),
+      ...(data.coverColor !== undefined && normalizeCoverColor(data.coverColor)
+        ? { coverImageUrl: null, coverThumbUrl: null }
+        : {}),
       ...(data.coverSize !== undefined ? { coverSize: data.coverSize === 'FULL' ? 'FULL' : 'NORMAL' } : {}),
     };
 
@@ -2419,6 +2431,9 @@ export class KanbanService {
       await logUpdate();
       if (data.assigneeUserId && data.assigneeUserId !== existing.assigneeUserId) {
         notifyCardAssigned(userId, id, [data.assigneeUserId]);
+      }
+      if (existing.coverImageUrl && !card.coverImageUrl) {
+        await this.removeUnusedCoverFiles(existing.coverImageUrl, existing.coverThumbUrl);
       }
       return formatCard(card);
     }
@@ -2729,6 +2744,8 @@ export class KanbanService {
           workHours: source.workHours,
           coverColor: source.coverColor,
           coverSize: source.coverSize,
+          coverImageUrl: source.coverImageUrl,
+          coverThumbUrl: source.coverThumbUrl,
           completedAt: null,
           position: 0,
           ...(source.members.length > 0
@@ -2773,6 +2790,62 @@ export class KanbanService {
     });
 
     return formatCard(duplicated);
+  }
+
+  /** Grava a foto de capa (imagem + miniatura já reduzidas pelo navegador). */
+  async setCardCoverImage(
+    userId: string,
+    cardId: string,
+    image: { buffer: Buffer; mimetype: string },
+    thumb: { buffer: Buffer; mimetype: string },
+  ) {
+    await this.assertCardAccess(userId, cardId);
+    const previous = await prisma.kanbanCard.findUnique({
+      where: { id: cardId },
+      select: { coverImageUrl: true, coverThumbUrl: true },
+    });
+    if (!previous) throw new Error('Card não encontrado');
+
+    const save = (file: { buffer: Buffer; mimetype: string }) =>
+      savePersistentUpload({
+        folder: 'kanban-covers',
+        buffer: file.buffer,
+        originalName: 'capa.jpg',
+        mimeType: file.mimetype,
+      });
+    const [savedImage, savedThumb] = await Promise.all([save(image), save(thumb)]);
+
+    const card = await prisma.kanbanCard.update({
+      where: { id: cardId },
+      data: { coverImageUrl: savedImage.url, coverThumbUrl: savedThumb.url, coverColor: null },
+      include: boardListCardInclude,
+    });
+    await this.removeUnusedCoverFiles(previous.coverImageUrl, previous.coverThumbUrl);
+    return formatCard(card);
+  }
+
+  async removeCardCoverImage(userId: string, cardId: string) {
+    await this.assertCardAccess(userId, cardId);
+    const previous = await prisma.kanbanCard.findUnique({
+      where: { id: cardId },
+      select: { coverImageUrl: true, coverThumbUrl: true },
+    });
+    if (!previous) throw new Error('Card não encontrado');
+    const card = await prisma.kanbanCard.update({
+      where: { id: cardId },
+      data: { coverImageUrl: null, coverThumbUrl: null, coverSize: 'NORMAL' },
+      include: boardListCardInclude,
+    });
+    await this.removeUnusedCoverFiles(previous.coverImageUrl, previous.coverThumbUrl);
+    return formatCard(card);
+  }
+
+  /** Apaga os arquivos de uma capa antiga, se nenhum outro card (cópia) ainda usa. */
+  private async removeUnusedCoverFiles(imageUrl: string | null, thumbUrl: string | null) {
+    if (!imageUrl) return;
+    const inUse = await prisma.kanbanCard.count({ where: { coverImageUrl: imageUrl } });
+    if (inUse > 0) return;
+    await Promise.all([deletePersistentUpload(imageUrl), deletePersistentUpload(thumbUrl)]);
   }
 
   async deleteCard(userId: string, id: string) {

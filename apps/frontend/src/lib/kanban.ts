@@ -45,6 +45,9 @@ export interface KanbanCard {
   /** Capa colorida (green, yellow, orange, red, purple, blue, sky, lime, pink, black) ou null. */
   coverColor?: string | null;
   coverSize?: 'NORMAL' | 'FULL';
+  /** Foto de capa (substitui a cor): imagem grande e miniatura usada no quadro. */
+  coverImageUrl?: string | null;
+  coverThumbUrl?: string | null;
 }
 
 export interface KanbanCardCostPerson {
@@ -755,6 +758,19 @@ export async function updateKanbanCard(
     ),
   );
   return run;
+}
+
+export async function uploadKanbanCardCover(cardId: string, image: Blob, thumb: Blob) {
+  const body = new FormData();
+  body.append('image', image, 'capa.jpg');
+  body.append('thumb', thumb, 'capa-mini.jpg');
+  const res = await api.post(`/kanban/cards/${cardId}/cover`, body, { timeout: 120_000 });
+  return res.data.data as KanbanCard;
+}
+
+export async function removeKanbanCardCover(cardId: string) {
+  const res = await api.delete(`/kanban/cards/${cardId}/cover`);
+  return res.data.data as KanbanCard;
 }
 
 /**

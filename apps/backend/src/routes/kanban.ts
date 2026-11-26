@@ -67,6 +67,10 @@ router.get('/cards/:id', (req, res, next) => controller.getCardById(req, res, ne
 router.get('/cards/:id/cost', (req, res, next) => controller.getCardCost(req, res, next));
 router.patch('/cards/:id/move', (req, res, next) => controller.moveCard(req, res, next));
 router.patch('/cards/:id', (req, res, next) => controller.updateCard(req, res, next));
+router.post('/cards/:id/cover', KanbanController.uploadCover(), (req, res, next) =>
+  controller.setCardCover(req, res, next),
+);
+router.delete('/cards/:id/cover', (req, res, next) => controller.removeCardCover(req, res, next));
 router.post('/cards/:id/duplicate', (req, res, next) => controller.duplicateCard(req, res, next));
 router.delete('/cards/:id', (req, res, next) => controller.deleteCard(req, res, next));
 

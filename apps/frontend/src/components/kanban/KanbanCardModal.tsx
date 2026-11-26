@@ -66,6 +66,8 @@ import {
   deleteKanbanComment,
   type KanbanChecklistItem,
   type KanbanCardActivity,
+  uploadKanbanCardCover,
+  removeKanbanCardCover,
 } from '@/lib/kanban';
 import { KanbanCardCostModal } from './KanbanCardCostModal';
 import { KanbanCardMaterialsModal } from './KanbanCardMaterialsModal';
@@ -80,7 +82,8 @@ import { KanbanCardActionButton } from './KanbanCardActionButton';
 import { KanbanCardDatesPanel } from './KanbanCardDatesPopover';
 import { KanbanCardLabelsPanel, KanbanLabelChips } from './KanbanCardLabelsPopover';
 import { KanbanCardCoverPanel } from './KanbanCardCoverPanel';
-import { coverHex, normalizeCoverSize, type KanbanCoverSize } from './kanbanCover';
+import { coverHex, normalizeCoverSize, prepareCoverImages, type KanbanCoverSize } from './kanbanCover';
+import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import { getKanbanLabelNameForColor, type KanbanLabelPreset } from './kanbanLabels';
 import {
   LicitacaoCommentEditor,
@@ -454,6 +457,9 @@ export function KanbanCardModal({
   const [endDate, setEndDate] = useState('');
   const [coverColor, setCoverColor] = useState<string | null>(null);
   const [coverSize, setCoverSize] = useState<KanbanCoverSize>('NORMAL');
+  const [coverImageUrl, setCoverImageUrl] = useState<string | null>(null);
+  const [coverThumbUrl, setCoverThumbUrl] = useState<string | null>(null);
+  const [coverBusy, setCoverBusy] = useState(false);
   const [members, setMembers] = useState<KanbanCardMember[]>([]);
   const [columnId, setColumnId] = useState(initialColumnId);
   const [showMemberPicker, setShowMemberPicker] = useState(false);
@@ -572,6 +578,8 @@ export function KanbanCardModal({
     setEndDate(initialCard.endDate ?? '');
     setCoverColor(initialCard.coverColor ?? null);
     setCoverSize(normalizeCoverSize(initialCard.coverSize));
+    setCoverImageUrl(initialCard.coverImageUrl ?? null);
+    setCoverThumbUrl(initialCard.coverThumbUrl ?? null);
     setMembers(Array.isArray(initialCard.members) ? initialCard.members : []);
     setLabels(Array.isArray(initialCard.labels) ? initialCard.labels : []);
     labelsLiveRef.current = Array.isArray(initialCard.labels) ? initialCard.labels : [];
@@ -631,6 +639,8 @@ export function KanbanCardModal({
       const next = normalizeCoverSize(card.coverSize);
       return prev === next ? prev : next;
     });
+    setCoverImageUrl(card.coverImageUrl ?? null);
+    setCoverThumbUrl(card.coverThumbUrl ?? null);
     if (memberMutationInFlight.current === 0) {
       setMembers((prev) => {
         const next = Array.isArray(card.members) ? card.members : [];
@@ -867,6 +877,8 @@ export function KanbanCardModal({
         endDate: endDate || null,
         coverColor,
         coverSize,
+        coverImageUrl,
+        coverThumbUrl,
         checklistEnabled,
         members,
       });
@@ -882,6 +894,8 @@ export function KanbanCardModal({
         endDate: endDate || null,
         coverColor,
         coverSize,
+        coverImageUrl,
+        coverThumbUrl,
         checklistEnabled,
         members,
       };
@@ -912,6 +926,8 @@ export function KanbanCardModal({
       ...(partial.endDate !== undefined ? { endDate: partial.endDate } : {}),
       ...(partial.labels !== undefined ? { labels: partial.labels } : {}),
       ...(partial.coverColor !== undefined ? { coverColor: partial.coverColor } : {}),
+      // Escolher uma cor substitui a foto (mesma regra do servidor).
+      ...(partial.coverColor ? { coverImageUrl: null, coverThumbUrl: null } : {}),
       ...(partial.coverSize !== undefined ? { coverSize: partial.coverSize } : {}),
       ...(partial.checklistEnabled !== undefined
         ? { checklistEnabled: partial.checklistEnabled }
@@ -934,6 +950,57 @@ export function KanbanCardModal({
       payload.checklistEnabled = partial.checklistEnabled;
     }
     return payload;
+  }
+
+  /** Envia (ou remove) a foto de capa e reflete o resultado no cartão e no quadro. */
+  async function changeCoverImage(request: () => Promise<KanbanCard>, errorMessage: string) {
+    if (!cardId || isOptimisticKanbanCardId(cardId) || coverBusy) return;
+    const base = buildLocalBoardCard();
+    if (!base) return;
+    setCoverBusy(true);
+    try {
+      const updated = await request();
+      const cover = {
+        coverColor: updated.coverColor ?? null,
+        coverSize: normalizeCoverSize(updated.coverSize),
+        coverImageUrl: updated.coverImageUrl ?? null,
+        coverThumbUrl: updated.coverThumbUrl ?? null,
+      };
+      setCoverColor(cover.coverColor);
+      setCoverSize(cover.coverSize);
+      setCoverImageUrl(cover.coverImageUrl);
+      setCoverThumbUrl(cover.coverThumbUrl);
+      syncCardFromApi({ ...base, ...cover }, columnId);
+    } catch (err: unknown) {
+      console.error('Falha na foto de capa:', err);
+      const apiError = err as {
+        isAxiosError?: boolean;
+        response?: { status?: number; data?: { message?: string } };
+      };
+      if (apiError?.isAxiosError) {
+        // Separa "o servidor recusou" de "o servidor não respondeu".
+        const status = apiError.response?.status;
+        toast.error(
+          apiError.response?.data?.message ||
+            (status
+              ? `O servidor recusou a foto (erro ${status}).`
+              : 'O servidor não respondeu. Confira se ele está ligado.'),
+        );
+      } else {
+        toast.error(errorMessage);
+      }
+    } finally {
+      setCoverBusy(false);
+    }
+  }
+
+  function setCoverFromBlob(load: () => Promise<Blob>) {
+    const id = cardId;
+    if (!id) return;
+    void changeCoverImage(async () => {
+      const { image, thumb } = await prepareCoverImages(await load());
+      return uploadKanbanCardCover(id, image, thumb);
+    }, 'Não consegui abrir essa imagem. Tente uma foto em JPG ou PNG.');
   }
 
   function saveMeta(partial?: MetaPartial, options?: { titleGen?: number }): boolean {
@@ -1890,10 +1957,34 @@ export function KanbanCardModal({
           <KanbanCardCoverPanel
             color={coverColor}
             size={coverSize}
+            imageSrc={resolveApiMediaUrl(coverThumbUrl) ?? null}
+            busy={coverBusy}
+            attachmentImages={(card?.attachmentsList ?? [])
+              .filter((a) => a.mimeType?.startsWith('image/') && a.fileUrl.startsWith('/uploads'))
+              .map((a) => ({ id: a.id, fileName: a.fileName, src: resolveApiMediaUrl(a.fileUrl) ?? '' }))}
+            onPickFile={isDetail ? (file) => setCoverFromBlob(async () => file) : undefined}
+            onPickAttachment={(attachmentId) =>
+              setCoverFromBlob(async () => {
+                const res = await api.get(`/kanban/attachments/${attachmentId}/download`, {
+                  responseType: 'blob',
+                });
+                return res.data as Blob;
+              })
+            }
+            onRemoveImage={() => {
+              const id = cardId;
+              if (id) {
+                void changeCoverImage(() => removeKanbanCardCover(id), 'Não foi possível remover a capa');
+              }
+            }}
             onClose={() => setOpenMenu(null)}
             onChange={(next) => {
               setCoverColor(next.color);
               setCoverSize(next.size);
+              if (next.color) {
+                setCoverImageUrl(null);
+                setCoverThumbUrl(null);
+              }
               if (isDetail) saveMeta({ coverColor: next.color, coverSize: next.size });
             }}
           />
@@ -1999,8 +2090,8 @@ export function KanbanCardModal({
               type="button"
               disabled={saving}
               onClick={() => setOpenMenu((m) => (m === 'cover' ? null : 'cover'))}
-              title="Capa colorida do cartão"
-              aria-label="Capa colorida do cartão"
+              title="Capa do cartão"
+              aria-label="Capa do cartão"
               className={clsx(
                 'inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-sm transition-colors',
                 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200',
@@ -2008,7 +2099,13 @@ export function KanbanCardModal({
                 saving && 'opacity-50 pointer-events-none',
               )}
             >
-              {coverColor ? (
+              {coverThumbUrl ? (
+                <img
+                  src={resolveApiMediaUrl(coverThumbUrl)}
+                  alt=""
+                  className="h-4 w-4 shrink-0 rounded object-cover"
+                />
+              ) : coverColor ? (
                 <span
                   className="h-4 w-4 shrink-0 rounded"
                   style={{ backgroundColor: coverHex(coverColor) ?? undefined }}

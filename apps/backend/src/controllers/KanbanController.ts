@@ -32,6 +32,16 @@ const kanbanUpload = multer({
   limits: { fileSize: 10 * 1024 * 1024 },
 });
 
+// Foto de capa: o navegador já manda a imagem e a miniatura reduzidas em JPEG.
+const kanbanCoverUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype === 'image/jpeg') cb(null, true);
+    else cb(new Error('Imagem de capa inválida'));
+  },
+});
+
 function requireUserId(req: AuthRequest, next: NextFunction): string | null {
   const id = req.user?.id;
   if (!id) {
@@ -947,6 +957,43 @@ export class KanbanController {
       res.json({ success: true, data: await getTrelloMigrationStatus() });
     } catch (error) {
       next(error);
+    }
+  }
+
+  static uploadCover() {
+    return kanbanCoverUpload.fields([
+      { name: 'image', maxCount: 1 },
+      { name: 'thumb', maxCount: 1 },
+    ]);
+  }
+
+  async setCardCover(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const files = (req as AuthRequest & { files?: Record<string, Express.Multer.File[]> }).files;
+      const image = files?.image?.[0];
+      const thumb = files?.thumb?.[0];
+      if (!image || !thumb) return next(createError('Selecione uma imagem para a capa', 400));
+      const card = await kanbanService.setCardCoverImage(userId, req.params.id, image, thumb);
+      res.json({ success: true, data: card });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : '';
+      if (msg === 'Card não encontrado') return next(createError(msg, 404));
+      handleKanbanError(error, next);
+    }
+  }
+
+  async removeCardCover(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const card = await kanbanService.removeCardCoverImage(userId, req.params.id);
+      res.json({ success: true, data: card });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : '';
+      if (msg === 'Card não encontrado') return next(createError(msg, 404));
+      handleKanbanError(error, next);
     }
   }
 

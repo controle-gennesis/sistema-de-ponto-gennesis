@@ -150,6 +150,8 @@ export default function KanbanDashboardPage() {
     fontSize: 12,
     color: isDark ? '#f3f4f6' : '#111827',
   };
+  // Barras e fatias com várias cores não têm cor própria no texto: sem isto o número sai preto.
+  const tooltipItemStyle = { color: tooltipStyle.color, fontWeight: 600 };
 
   const weekly = useMemo(
     () =>
@@ -468,7 +470,7 @@ export default function KanbanDashboardPage() {
                             <Cell key={d.name} fill={d.fill} />
                           ))}
                         </Pie>
-                        <Tooltip contentStyle={tooltipStyle} />
+                        <Tooltip contentStyle={tooltipStyle} itemStyle={tooltipItemStyle} />
                         <Legend wrapperStyle={{ fontSize: 12 }} />
                       </PieChart>
                     </ResponsiveContainer>
@@ -553,7 +555,7 @@ export default function KanbanDashboardPage() {
                         <CartesianGrid stroke={c.grid} horizontal={false} />
                         <XAxis type="number" allowDecimals={false} tick={{ fill: c.tick, fontSize: 12 }} />
                         <YAxis type="category" dataKey="text" width={200} interval={0} tickFormatter={shortLabel} tick={{ fill: c.tick, fontSize: 12 }} />
-                        <Tooltip contentStyle={tooltipStyle} cursor={{ fill: 'rgba(128,128,128,0.12)' }} />
+                        <Tooltip contentStyle={tooltipStyle} itemStyle={tooltipItemStyle} cursor={{ fill: 'rgba(128,128,128,0.12)' }} />
                         <Bar dataKey="count" name="Tasks" radius={[0, 4, 4, 0]}>
                           {(data?.byLabel ?? []).map((l, i) => (
                             <Cell key={`${l.color}-${l.text}-${i}`} fill={safeLabelHex(l.color)} />

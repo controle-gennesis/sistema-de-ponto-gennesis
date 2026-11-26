@@ -148,6 +148,7 @@ import { clsx } from 'clsx';
 import toast from 'react-hot-toast';
 import { useKanbanColaboracao } from './useKanbanColaboracao';
 import { coverHex, normalizeCoverSize } from '@/components/kanban/kanbanCover';
+import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import {
   KanbanPresenceBar,
   presenceActionLabel,
@@ -1025,6 +1026,7 @@ function kanbanCardBoardSnapshot(card: KanbanCard): string {
     card.labels.map((l) => `${l.color}:${l.text}`).join(','),
     card.coverColor ?? '',
     card.coverSize ?? '',
+    card.coverThumbUrl ?? '',
     (card.members ?? []).map((m) => m.userId).join(','),
     card.assignee,
   ].join('|');
@@ -1080,9 +1082,13 @@ function KanbanCardItem({
   const { celebrating, trigger: triggerCelebrate } = useCelebratePulse();
   const isCompleted = Boolean(card.completedAt);
   const showCompleteCheck = true;
-  const coverColorHex = coverHex(card.coverColor);
-  const coverFull = !!coverColorHex && normalizeCoverSize(card.coverSize) === 'FULL';
-  const coverStrip = !!coverColorHex && !coverFull;
+  const coverImageSrc = resolveApiMediaUrl(card.coverThumbUrl ?? null);
+  const coverColorHex = coverImageSrc ? null : coverHex(card.coverColor);
+  const coverIsFullSize = normalizeCoverSize(card.coverSize) === 'FULL';
+  const coverFull = (!!coverColorHex || !!coverImageSrc) && coverIsFullSize;
+  const coverStrip = !!coverColorHex && !coverIsFullSize;
+  const photoFull = !!coverImageSrc && coverIsFullSize;
+  const photoStrip = !!coverImageSrc && !coverIsFullSize;
   const showArchiveAction =
     isCompleted && !readOnly && Boolean(onArchiveCard);
   const titleIndented =
@@ -1152,6 +1158,7 @@ function KanbanCardItem({
       className={clsx(
         'group relative rounded-2xl border border-transparent p-4',
         coverFull && coverColorHex ? 'text-white' : 'bg-white dark:bg-gray-800',
+        photoFull && 'flex min-h-[170px] flex-col justify-end text-white',
         menuOpen && 'z-30',
         'cursor-pointer select-none shadow-[0_1px_3px_rgba(0,0,0,0.08)]',
         'transition-[border-color,filter] duration-200 ease-out',
@@ -1166,6 +1173,31 @@ function KanbanCardItem({
       )}
     >
       {paperConfettiHost}
+      {photoStrip ? (
+        <img
+          src={coverImageSrc}
+          alt=""
+          loading="lazy"
+          draggable={false}
+          className="-mx-4 -mt-4 mb-3 block h-36 w-[calc(100%+2rem)] max-w-none rounded-t-2xl object-cover"
+        />
+      ) : null}
+      {photoFull ? (
+        <>
+          <img
+            src={coverImageSrc}
+            alt=""
+            loading="lazy"
+            draggable={false}
+            className="absolute inset-0 h-full w-full rounded-2xl object-cover"
+          />
+          {/* Escurece a foto para o título continuar legível. */}
+          <div
+            className="absolute inset-0 rounded-2xl bg-gradient-to-t from-black/80 via-black/40 to-black/10"
+            aria-hidden
+          />
+        </>
+      ) : null}
       {coverStrip ? (
         <div
           className="-mx-4 -mt-4 mb-3 h-9 rounded-t-2xl"
