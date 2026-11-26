@@ -242,6 +242,8 @@ function DropdownCheckbox({
 
 export type MultiSelectSearchDropdownProps = {
   label?: string;
+  /** Botão quadrado só com o ícone (barra de ferramentas), sem texto nem seta. */
+  iconOnly?: boolean;
   options: MultiSelectSearchOption[];
   selected: string[];
   onChange: (selected: string[]) => void;
@@ -505,6 +507,7 @@ export function MultiSelectSearchDropdown({
   onOpenChange,
   onSearchChange,
   filterLocally = true,
+  iconOnly = false,
 }: MultiSelectSearchDropdownProps) {
   void _menuOverlapContent;
   const effectiveListMax = listMaxHeightProp ?? LIST_MAX;
@@ -759,18 +762,29 @@ export function MultiSelectSearchDropdown({
           // Evita o botão roubar o foco da barra de busca ao abrir.
           if (!open) e.preventDefault();
         }}
-        className={`${SINGLE_SELECT_TRIGGER_BASE_CLS} ${icon ? 'pl-10' : ''} ${singleSelectTriggerBorderClass(open, suppressOpenBorder)} ${singleSelectTriggerTextClass(hasSelection)}`}
-        data-form-field-trigger="true"
+        className={
+          iconOnly
+            ? 'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+            : `${SINGLE_SELECT_TRIGGER_BASE_CLS} ${icon ? 'pl-10' : ''} ${singleSelectTriggerBorderClass(open, suppressOpenBorder)} ${singleSelectTriggerTextClass(hasSelection)}`
+        }
+        data-form-field-trigger={iconOnly ? undefined : 'true'}
         aria-expanded={open}
         aria-haspopup="listbox"
+        aria-label={iconOnly ? placeholder : undefined}
       >
-        {icon ? (
-          <span className="pointer-events-none absolute left-3 top-1/2 flex -translate-y-1/2 text-gray-400 dark:text-gray-500">
-            {icon}
-          </span>
-        ) : null}
-        <span className="block truncate">{triggerLabel}</span>
-        <SingleSelectTriggerChevron open={open} />
+        {iconOnly ? (
+          icon
+        ) : (
+          <>
+            {icon ? (
+              <span className="pointer-events-none absolute left-3 top-1/2 flex -translate-y-1/2 text-gray-400 dark:text-gray-500">
+                {icon}
+              </span>
+            ) : null}
+            <span className="block truncate">{triggerLabel}</span>
+            <SingleSelectTriggerChevron open={open} />
+          </>
+        )}
       </button>
 
       {inlineMenu}

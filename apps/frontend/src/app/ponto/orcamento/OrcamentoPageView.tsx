@@ -8454,7 +8454,7 @@ export function OrcamentoPageView({
   /** Total de título/subtítulo clicado: mostra a conta e pinta as células que entram nela. */
   const [somaOrc, setSomaOrc] = useState<{
     chave: string;
-    coluna: 'total' | 'totalBdi' | 'peso';
+    coluna: 'total' | 'totalBdi' | 'totalBdiDesc' | 'peso';
     ancora: HTMLElement;
   } | null>(null);
   useEffect(() => {
@@ -16988,6 +16988,7 @@ export function OrcamentoPageView({
     if (!somaOrc) return null;
     const { chave, coluna } = somaOrc;
     const campo = coluna === 'total' ? 'total' : 'totalComBdi';
+    const fator = coluna === 'totalBdiDesc' ? 1 - descontoRodapePct : 1;
     const somar = (lista: typeof itensCalculados, c: 'total' | 'totalComBdi') =>
       lista.reduce((acc, r) => acc + r[c], 0);
     let partes: Array<{ valor: number; fonte: string | null }> = [];
@@ -17007,12 +17008,12 @@ export function OrcamentoPageView({
     } else if (chave.startsWith('s:')) {
       const b = subtitulosAdicionados.find((x) => `s:${x.key}` === chave);
       const rowsBloco = b ? itensCalculadosPorBlocoNome.get(`${b.servicoNome}\0${b.subtituloNome}`) ?? [] : [];
-      partes = rowsBloco.map((r) => ({ valor: r[campo], fonte: `${r.key}|${coluna}` }));
+      partes = rowsBloco.map((r) => ({ valor: r[campo] * fator, fonte: `${r.key}|${coluna}` }));
     } else {
       const servico = chave.slice(2);
       const blocosDoTitulo = subtitulosAdicionados.filter((b) => b.servicoNome === servico);
       partes = blocosDoTitulo.map((b) => ({
-        valor: somar(itensCalculadosPorBlocoNome.get(`${b.servicoNome}\0${b.subtituloNome}`) ?? [], campo),
+        valor: somar(itensCalculadosPorBlocoNome.get(`${b.servicoNome}\0${b.subtituloNome}`) ?? [], campo) * fator,
         fonte: `s:${b.key}|${coluna}`,
       }));
     }
@@ -17050,7 +17051,7 @@ export function OrcamentoPageView({
     return idx == null ? '' : PALETA_FORMULA[idx]!.celula;
   };
   /** Dentro da própria célula clicada: a fórmula colorida no lugar do valor. */
-  const conteudoSomaOrc = (chave: string, coluna: 'total' | 'totalBdi' | 'peso'): React.ReactNode | null => {
+  const conteudoSomaOrc = (chave: string, coluna: 'total' | 'totalBdi' | 'totalBdiDesc' | 'peso'): React.ReactNode | null => {
     if (!somaOrc || !somaOrcInfo || somaOrc.chave !== chave || somaOrc.coluna !== coluna) return null;
     // Fundo escuro (texto da linha claro) usa os tons claros; fundo claro usa os tons escuros.
     const rgb = /\d+(\.\d+)?/g;
@@ -17089,7 +17090,7 @@ export function OrcamentoPageView({
   const alternarSomaOrc = (
     e: React.MouseEvent<HTMLElement>,
     chave: string,
-    coluna: 'total' | 'totalBdi' | 'peso'
+    coluna: 'total' | 'totalBdi' | 'totalBdiDesc' | 'peso'
   ) => {
     e.stopPropagation();
     const ancora = e.currentTarget;
@@ -22791,8 +22792,16 @@ export function OrcamentoPageView({
                                   <MoedaCelula valor={resumoTitulo.totalComBdi} className="text-sm text-white font-semibold" valorClassName="font-semibold" />
                                 )}
                               </td>
-                              <td data-orc-col="totalBdiDesc" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`}>
-                                <MoedaCelula valor={resumoTitulo.totalComBdi * (1 - descontoRodapePct)} className="text-sm text-white font-semibold" valorClassName="font-semibold" />
+                              <td
+                                ref={refTextoSomaOrc(`t:${bloco.servicoNome}`, 'totalBdiDesc')}
+                                data-orc-col="totalBdiDesc"
+                                className={`cursor-pointer px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo} ${classeCelulaSomaOrc(`t:${bloco.servicoNome}`, 'totalBdiDesc')}`}
+                                title="Clique para ver de onde vem este valor"
+                                onClick={e => alternarSomaOrc(e, `t:${bloco.servicoNome}`, 'totalBdiDesc')}
+                              >
+                                {conteudoSomaOrc(`t:${bloco.servicoNome}`, 'totalBdiDesc') ?? (
+                                  <MoedaCelula valor={resumoTitulo.totalComBdi * (1 - descontoRodapePct)} className="text-sm text-white font-semibold" valorClassName="font-semibold" />
+                                )}
                               </td>
                               <td
                                 data-orc-col="peso"
@@ -22910,8 +22919,16 @@ export function OrcamentoPageView({
                                   <MoedaCelula valor={resumoSubtitulo.totalComBdi} className="text-sm font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
                                 )}
                               </td>
-                              <td data-orc-col="totalBdiDesc" className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`}>
-                                <MoedaCelula valor={resumoSubtitulo.totalComBdi * (1 - descontoRodapePct)} className="text-sm font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
+                              <td
+                                ref={refTextoSomaOrc(`s:${bloco.key}`, 'totalBdiDesc')}
+                                data-orc-col="totalBdiDesc"
+                                className={`cursor-pointer px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub} ${classeCelulaSomaOrc(`s:${bloco.key}`, 'totalBdiDesc')}`}
+                                title="Clique para ver de onde vem este valor"
+                                onClick={e => alternarSomaOrc(e, `s:${bloco.key}`, 'totalBdiDesc')}
+                              >
+                                {conteudoSomaOrc(`s:${bloco.key}`, 'totalBdiDesc') ?? (
+                                  <MoedaCelula valor={resumoSubtitulo.totalComBdi * (1 - descontoRodapePct)} className="text-sm font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
+                                )}
                               </td>
                               <td
                                 data-orc-col="peso"
@@ -23307,10 +23324,35 @@ export function OrcamentoPageView({
                                       <td
                                         data-orc-col="totalBdiDesc"
                                         style={estiloFundoPinturaOrc(row.key, 'totalBdiDesc', coresLinhaPorKey, coresCelulaPorKey, isDark)}
-                                        className="px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums border-l border-gray-200 dark:border-gray-700 font-semibold text-gray-900 dark:text-gray-50"
-                                        title={`Valor total com BDI menos o desconto do orçamento (${(descontoRodapePct * 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%)`}
+                                        className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums border-l border-gray-200 dark:border-gray-700 font-semibold text-gray-900 dark:text-gray-50 ${classeCelulaSomaOrc(row.key, 'totalBdiDesc')}`}
+                                        onClick={(e) => e.stopPropagation()}
                                       >
-                                        <MoedaCelula valor={row.totalComBdi * (1 - descontoRodapePct)} />
+                                        {(() => {
+                                          const inputId = `orc-campo-totalBdiDesc-${String(row.key).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+                                          const descontoTxt = descontoRodapePct.toLocaleString('pt-BR', { maximumFractionDigits: 4 });
+                                          const formula = `=${formatarMoedaCampoOrc(row.totalComBdi)}*(1-${descontoTxt})`;
+                                          return (
+                                            <div className="flex w-full cursor-cell items-baseline justify-between gap-1.5 px-0.5 text-sm font-semibold tabular-nums">
+                                              <span className="shrink-0 opacity-80 [&:has(+div_input[data-formula=true])]:hidden">R$</span>
+                                              <FdCampoLocal
+                                                id={inputId}
+                                                somenteLeitura
+                                                editarComDuploClique
+                                                committedValue={formatarMoedaCampoOrc(row.totalComBdi * (1 - descontoRodapePct))}
+                                                editValueOnFocus={formula}
+                                                colorirFormula={(texto) => segmentarFormulaOrc(texto, 1)}
+                                                overlayClassName="text-right text-sm font-semibold tabular-nums"
+                                                onCommit={() => {}}
+                                                onFocusExtra={() =>
+                                                  ativarDestaqueCalculoOrc(row.key, ['totalBdi'], formula, document.getElementById(inputId)?.closest('td') ?? null)
+                                                }
+                                                onBlurExtra={limparDestaqueCalculoOrc}
+                                                title={`Valor total com desconto — ${formula}`}
+                                                className="min-h-0 min-w-0 flex-1 border-0 bg-transparent p-0 text-right text-sm font-semibold tabular-nums text-gray-900 outline-none ring-0 focus:ring-0 dark:text-gray-50"
+                                              />
+                                            </div>
+                                          );
+                                        })()}
                                       </td>
                                       <td data-orc-col="peso" style={estiloFundoPinturaOrc(row.key, 'peso', coresLinhaPorKey, coresCelulaPorKey, isDark)} className="px-2 py-2.5 text-sm text-center align-middle text-gray-700 dark:text-gray-300 tabular-nums whitespace-nowrap border-l border-gray-200 dark:border-gray-700">
                                         {pesoPctOrcamento.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%
