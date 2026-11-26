@@ -2074,6 +2074,9 @@ export function KanbanCardModal({
     </>
   );
 
+  const coverBannerSrc = resolveApiMediaUrl(coverImageUrl ?? coverThumbUrl) ?? null;
+  const coverBannerHex = coverHex(coverColor);
+
   return (
     <>
     {paperConfettiHost}
@@ -2083,6 +2086,24 @@ export function KanbanCardModal({
       size={isCreate ? 'sm' : '5xl'}
       scrollContent={!isDetail}
       title={modalTitle}
+      banner={
+        isDetail && (coverBannerSrc || coverBannerHex) ? (
+          coverBannerSrc ? (
+            // A foto aparece inteira; as sobras laterais são a própria foto desfocada.
+            <div className="relative h-28 overflow-hidden bg-gray-100 dark:bg-gray-900 sm:h-40">
+              <img
+                src={coverBannerSrc}
+                alt=""
+                aria-hidden
+                className="absolute inset-0 h-full w-full scale-110 object-cover opacity-70 blur-2xl"
+              />
+              <img src={coverBannerSrc} alt="Capa do cartão" className="relative h-full w-full object-contain" />
+            </div>
+          ) : (
+            <div className="h-16" style={{ backgroundColor: coverBannerHex ?? undefined }} aria-hidden />
+          )
+        ) : undefined
+      }
       headerActions={
         isDetail ? (
           <div className="flex items-center gap-2 shrink-0">

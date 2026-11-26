@@ -1636,14 +1636,12 @@ body::-webkit-scrollbar:vertical {
   }
 }
 
-@keyframes kanban-card-gutter-in {
+@keyframes kanban-card-drop-slot-in {
   from {
     opacity: 0;
-    transform: scaleX(0.35);
   }
   to {
     opacity: 1;
-    transform: scaleX(1);
   }
 }
 
@@ -1686,9 +1684,8 @@ body::-webkit-scrollbar:vertical {
   pointer-events: none !important;
 }
 
-.kanban-card-drop-gutter-line {
-  transform-origin: center;
-  animation: kanban-card-gutter-in 0.2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+.kanban-card-drop-slot {
+  animation: kanban-card-drop-slot-in 0.15s ease-out;
 }
 
 .kanban-card-reordering,
@@ -1902,7 +1899,7 @@ body::-webkit-scrollbar:vertical {
 @media (prefers-reduced-motion: reduce) {
   .kanban-column-dragging,
   .kanban-column-drag-ghost,
-  .kanban-card-drop-gutter-line,
+  .kanban-card-drop-slot,
   .kanban-column-drop-gutter-line,
   .kanban-card-reordering,
   .kanban-column-reordering {

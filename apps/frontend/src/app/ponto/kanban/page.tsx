@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState, useRef, useCallback, useEffect, useMemo, Suspense } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { notifyManager, useQuery, useQueryClient } from '@tanstack/react-query';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Loading } from '@/components/ui/Loading';
 import { KanbanCardModal } from '@/components/kanban/KanbanCardModal';
@@ -130,6 +130,7 @@ import {
   Loader,
   Loader2,
   LayoutGrid,
+  ChevronRight,
   ChevronUp,
   Eye,
   Users,
@@ -148,6 +149,7 @@ import { clsx } from 'clsx';
 import toast from 'react-hot-toast';
 import { useKanbanColaboracao } from './useKanbanColaboracao';
 import { coverHex, normalizeCoverSize } from '@/components/kanban/kanbanCover';
+import { startKanbanCardDragGhost } from '@/components/kanban/kanbanCardDragGhost';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import {
   KanbanPresenceBar,
@@ -379,7 +381,7 @@ function replaceColumnCardsInBoardCache(
   };
 }
 
-const KANBAN_REORDER_MS = 380;
+const KANBAN_REORDER_MS = 260;
 
 type KanbanReorderIdAttr = 'data-kanban-card-id' | 'data-kanban-column-id';
 type KanbanReorderClass = 'kanban-card-reordering' | 'kanban-column-reordering';
@@ -410,6 +412,7 @@ function animateKanbanReorder(
   beforeRects: Map<string, DOMRect>,
   idAttribute: KanbanReorderIdAttr,
   reorderingClass: KanbanReorderClass,
+  droppedId?: string,
 ): void {
   if (kanbanPrefersReducedMotion()) return;
 
@@ -417,6 +420,18 @@ function animateKanbanReorder(
     const el = node as HTMLElement;
     const id = el.getAttribute(idAttribute);
     if (!id) return;
+
+    // O card solto já está onde a pessoa largou: só assenta, sem «voar» do lugar antigo.
+    if (id === droppedId) {
+      el.animate(
+        [
+          { transform: 'scale(1.03)', opacity: 0.7 },
+          { transform: 'scale(1)', opacity: 1 },
+        ],
+        { duration: 200, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' },
+      );
+      return;
+    }
 
     const first = beforeRects.get(id);
     if (!first) return;
@@ -431,34 +446,53 @@ function animateKanbanReorder(
     el.style.transition = 'none';
 
     const cleanup = () => {
+      el.removeEventListener('transitionend', onEnd);
       el.classList.remove(reorderingClass);
       el.style.transition = '';
       el.style.transform = '';
+    };
+    // Só o fim do deslocamento encerra (hover e filhos também disparam transitionend).
+    const onEnd = (event: TransitionEvent) => {
+      if (event.target === el && event.propertyName === 'transform') cleanup();
     };
 
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         el.style.transition = `transform ${KANBAN_REORDER_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`;
         el.style.transform = '';
-        el.addEventListener('transitionend', cleanup, { once: true });
+        el.addEventListener('transitionend', onEnd);
         window.setTimeout(cleanup, KANBAN_REORDER_MS + 80);
       });
     });
   });
 }
 
+/**
+ * Anima a reordenação assim que o DOM muda e antes de o navegador pintar. Esperar quadros deixava o
+ * card aparecer no lugar novo, voltar ao antigo e só então deslizar (o «pulo» ao mover).
+ */
 function scheduleKanbanReorderAnimation(
   container: HTMLElement | null,
   beforeRects: Map<string, DOMRect>,
   idAttribute: KanbanReorderIdAttr,
   reorderingClass: KanbanReorderClass,
+  droppedId?: string,
 ): void {
   if (!container || kanbanPrefersReducedMotion()) return;
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      animateKanbanReorder(container, beforeRects, idAttribute, reorderingClass);
+
+  const observer = new MutationObserver(() => {
+    const after = captureKanbanReorderRects(container, idAttribute);
+    const moved = Array.from(after).some(([id, rect]) => {
+      const before = beforeRects.get(id);
+      return !!before && (Math.abs(before.left - rect.left) >= 1 || Math.abs(before.top - rect.top) >= 1);
     });
+    // Mudanças sem deslocamento (ex.: sumir a linha de drop) não contam.
+    if (!moved) return;
+    observer.disconnect();
+    animateKanbanReorder(container, beforeRects, idAttribute, reorderingClass, droppedId);
   });
+  observer.observe(container, { childList: true, subtree: true });
+  window.setTimeout(() => observer.disconnect(), 600);
 }
 
 function resolveColumnInsertIndex(
@@ -1120,6 +1154,7 @@ function KanbanCardItem({
           : (e) => {
               e.stopPropagation();
               suppressClickRef.current = true;
+              startKanbanCardDragGhost(e);
               onDragStart(e, card.id, columnId);
             }
       }
@@ -1404,16 +1439,20 @@ const KanbanCardItemMemo = React.memo(
     kanbanCardBoardSnapshot(prev.card) === kanbanCardBoardSnapshot(next.card),
 );
 
-function KanbanDropLine({ active }: { active: boolean }) {
+/** Espaço tracejado do tamanho do card arrastado, no lugar onde ele vai entrar. */
+function KanbanDropSlot({ className }: { className?: string }) {
   return (
     <div
+      data-kanban-drop-slot
       className={clsx(
-        'pointer-events-none absolute inset-x-3 z-[3] h-0.5 -translate-y-1/2 rounded-full bg-red-500/90 transition-opacity duration-150',
-        active && 'kanban-card-drop-gutter-line opacity-100',
-        !active && 'scale-x-0 opacity-0',
+        'kanban-card-drop-slot flex items-center justify-center rounded-2xl border-2 border-dashed border-gray-400/70 bg-white/60 dark:border-gray-500/70 dark:bg-gray-800/40',
+        className,
       )}
+      style={{ height: 'var(--kanban-drag-h, 96px)' }}
       aria-hidden
-    />
+    >
+      <span className="text-sm font-medium text-gray-500 dark:text-gray-400">Soltar aqui</span>
+    </div>
   );
 }
 
@@ -1533,6 +1572,41 @@ function KanbanColumnComponent({
   const isChecklistView = cardViewMode === 'checklist';
   const visibleCards = column.cards.slice(0, visibleCount);
   const hasMoreCards = column.cards.length > visibleCount;
+
+  // Durante o arraste, quem está na lista desliza para abrir ou fechar o espaço.
+  const slidePositionsRef = useRef(new Map<HTMLElement, number>());
+  const slideSlotRef = useRef<number | null>(null);
+  const slotKey = dragState.draggingCardId && isTarget ? overIndex : null;
+  useLayoutEffect(() => {
+    const list = cardsScrollRef.current;
+    if (!list || !dragState.draggingCardId) {
+      slidePositionsRef.current.clear();
+      slideSlotRef.current = null;
+      return;
+    }
+    const slotChanged = slideSlotRef.current !== slotKey;
+    slideSlotRef.current = slotKey;
+    const animate = slotChanged && !kanbanPrefersReducedMotion();
+    const next = new Map<HTMLElement, number>();
+    list.querySelectorAll<HTMLElement>('[data-kanban-card-id], [data-kanban-add-card]').forEach((el) => {
+      // offsetTop ignora transformações: é o lugar real, mesmo no meio de um deslize.
+      const wrapperTop = el.hasAttribute('data-kanban-card-id') ? (el.parentElement?.offsetTop ?? 0) : 0;
+      const top = el.offsetTop + wrapperTop;
+      next.set(el, top);
+      const before = slidePositionsRef.current.get(el);
+      if (!animate || before == null || before === top) return;
+      // Se ainda estava deslizando, continua de onde está.
+      const current = new DOMMatrixReadOnly(getComputedStyle(el).transform).m42;
+      el.getAnimations().forEach((a) => a.id === 'kanban-slide' && a.cancel());
+      const animation = el.animate(
+        [{ transform: `translateY(${before - top + current}px)` }, { transform: 'translateY(0)' }],
+        { duration: 180, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', id: 'kanban-slide' },
+      );
+      el.dataset.sliding = '1';
+      animation.onfinish = () => delete el.dataset.sliding;
+    });
+    slidePositionsRef.current = next;
+  });
 
   const loadMoreCards = useCallback(() => {
     setVisibleCount((current) =>
@@ -1982,17 +2056,16 @@ function KanbanColumnComponent({
           )}
         >
         {visibleCards.map((card, index) => {
-          const showLineBefore =
+          // Soltar logo acima ou abaixo de onde o card já está não muda nada: sem espaço.
+          const draggedIndex = visibleCards.findIndex((c) => c.id === dragState.draggingCardId);
+          const showSlot =
             !cardDnDDisabled &&
             !!dragState.draggingCardId &&
             dragState.overColumnId === column.id &&
-            overIndex === index;
-          const showLineAfter =
-            !cardDnDDisabled &&
-            !!dragState.draggingCardId &&
-            dragState.overColumnId === column.id &&
-            overIndex === index + 1 &&
-            index === visibleCards.length - 1;
+            !(draggedIndex >= 0 && (overIndex === draggedIndex || overIndex === draggedIndex + 1));
+          const showSlotBefore = showSlot && overIndex === index;
+          const showSlotAfter =
+            showSlot && overIndex === index + 1 && index === visibleCards.length - 1;
 
           return (
             <div
@@ -2005,7 +2078,12 @@ function KanbanColumnComponent({
                   : (e) => {
                       e.preventDefault();
                       e.stopPropagation();
-                      const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+                      // Sobre o próprio espaço a posição não muda (evita ficar piscando).
+                      if ((e.target as HTMLElement).closest('[data-kanban-drop-slot]')) return;
+                      const wrapper = e.currentTarget as HTMLDivElement;
+                      const cardEl = wrapper.querySelector<HTMLElement>('[data-kanban-card-id]');
+                      if (cardEl?.dataset.sliding) return;
+                      const rect = (cardEl ?? wrapper).getBoundingClientRect();
                       const middleY = rect.top + rect.height / 2;
                       const dropIndex = e.clientY < middleY ? index : index + 1;
                       onDragOver(e, column.id, dropIndex);
@@ -2017,22 +2095,15 @@ function KanbanColumnComponent({
                   : (e) => {
                       e.preventDefault();
                       e.stopPropagation();
-                      const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+                      const wrapper = e.currentTarget as HTMLDivElement;
+                      const rect = (wrapper.querySelector('[data-kanban-card-id]') ?? wrapper).getBoundingClientRect();
                       const middleY = rect.top + rect.height / 2;
                       const dropIndex = e.clientY < middleY ? index : index + 1;
                       onDrop(e, column.id, dropIndex);
                     }
               }
             >
-              {/* Linha de drop no meio do vão — não ocupa altura nem empurra cards. */}
-              <div
-                className={clsx(
-                  'pointer-events-none absolute inset-x-0 z-[3]',
-                  index === 0 ? '-top-1' : 'top-0',
-                )}
-              >
-                <KanbanDropLine active={showLineBefore} />
-              </div>
+              {showSlotBefore ? <KanbanDropSlot className="mb-2" /> : null}
               <KanbanCardItemMemo
                 card={card}
                 columnId={column.id}
@@ -2051,9 +2122,7 @@ function KanbanColumnComponent({
                 isDragging={dragState.draggingCardId === card.id}
                 presence={presenceByCard?.[card.id]}
               />
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[3]">
-                <KanbanDropLine active={showLineAfter} />
-              </div>
+              {showSlotAfter ? <KanbanDropSlot className="mt-2" /> : null}
             </div>
           );
         })}
@@ -2082,16 +2151,13 @@ function KanbanColumnComponent({
           >
             {!!dragState.draggingCardId &&
               dragState.overColumnId === column.id &&
-              overIndex === 0 && (
-                <div className="pointer-events-none absolute inset-x-0 top-1/2 z-[3]">
-                  <KanbanDropLine active />
-                </div>
-              )}
+              overIndex === 0 && <KanbanDropSlot className="mb-2" />}
           </div>
         )}
         {!readOnly && !isChecklistView && (
           <button
             type="button"
+            data-kanban-add-card
             onClick={() => onAddCard(column.id, 'top')}
             className={clsx(
               'flex w-full items-center gap-2 rounded-xl px-2 py-2.5 text-left text-sm font-medium transition-colors',
@@ -2685,25 +2751,23 @@ function KanbanBoardPicker({
   }, [open]);
 
   return (
-    <div className="relative" ref={rootRef}>
+    <div className="relative flex min-w-0 items-center gap-1" ref={rootRef}>
+      <span
+        title={currentBoardName}
+        className="max-w-[min(18rem,calc(100vw-12rem))] truncate text-sm font-semibold text-gray-900 dark:text-gray-100"
+      >
+        {currentBoardName}
+      </span>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-haspopup="listbox"
-        aria-label={`Quadro atual: ${currentBoardName}`}
-        title={currentBoardName}
-        className="inline-flex h-9 max-w-[min(18rem,calc(100vw-8rem))] items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 hover:text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800"
+        aria-label={`Trocar de quadro (atual: ${currentBoardName})`}
+        title="Trocar de quadro"
+        className="inline-flex size-7 shrink-0 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
       >
-        <LayoutGrid className="h-4 w-4 shrink-0 text-gray-500 dark:text-gray-400" />
-        <span className="min-w-0 truncate">{currentBoardName}</span>
-        <ChevronDown
-          className={clsx(
-            'h-4 w-4 shrink-0 text-gray-400 transition-transform dark:text-gray-500',
-            open && 'rotate-180',
-          )}
-          aria-hidden
-        />
+        <LayoutGrid className="h-4 w-4" aria-hidden />
       </button>
       {open && (
         <div className="absolute left-0 top-full z-50 mt-1 min-w-[16rem] w-max max-w-[min(22rem,calc(100vw-2rem))] rounded-xl border border-gray-200 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800">
@@ -2830,6 +2894,12 @@ function KanbanPage() {
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const departmentKeyParam = searchParams?.get('departmentKey') ?? null;
+  // Espaço no breadcrumb do topo onde fica o seletor de quadro.
+  const [breadcrumbSlot, setBreadcrumbSlot] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    const el = document.getElementById('app-breadcrumb-slot');
+    if (el !== breadcrumbSlot) setBreadcrumbSlot(el);
+  });
   const legacyListParam =
     searchParams?.get('list') === '1' || searchParams?.get('list') === 'true';
 
@@ -3433,6 +3503,7 @@ function KanbanPage() {
   const pendingCardDragOverRef = useRef<{ columnId: string; index: number | null } | null>(null);
   const prefetchCardTimerRef = useRef<Map<string, number>>(new Map());
   const columnDropHandledRef = useRef(false);
+  const cardDropPendingRef = useRef(false);
   const columnDragIdRef = useRef<string | null>(null);
   const columnDragOverIndexRef = useRef<number | null>(null);
   const columnDragGhostRef = useRef<HTMLElement | null>(null);
@@ -3909,6 +3980,7 @@ function KanbanPage() {
 
   const handleDragStart = useCallback((e: React.DragEvent, cardId: string, columnId: string) => {
     e.dataTransfer.effectAllowed = 'move';
+    boardCardsRef.current?.style.setProperty('--kanban-drag-h', `${(e.currentTarget as HTMLElement).offsetHeight}px`);
     columnDragIdRef.current = null;
     columnDragOverIndexRef.current = null;
     setColumnDrag({ draggingColumnId: null, overIndex: null });
@@ -3921,6 +3993,8 @@ function KanbanPage() {
   }, [setDragStateSync]);
 
   const handleDragEnd = useCallback(() => {
+    // Com um «soltar» em andamento, quem limpa é o handleDrop (junto com a mudança do card).
+    if (cardDropPendingRef.current) return;
     setDragStateSync({
       draggingCardId: null,
       fromColumnId: null,
@@ -4073,13 +4147,20 @@ function KanbanPage() {
 
       // Índice/coluna do elemento onde soltou — overIndex vem do último dragOver (slot real).
       const { draggingCardId, fromColumnId, overColumnId, overIndex } = dragRef.current;
-      setDragStateSync({
-        draggingCardId: null,
-        fromColumnId: null,
-        overColumnId: null,
-        overIndex: null,
-      });
-      if (!draggingCardId || !fromColumnId) return;
+      if (cardDragOverRafRef.current != null) {
+        window.cancelAnimationFrame(cardDragOverRafRef.current);
+        cardDragOverRafRef.current = null;
+      }
+      const clearDrag = () => {
+        cardDropPendingRef.current = false;
+        setDragStateSync({
+          draggingCardId: null,
+          fromColumnId: null,
+          overColumnId: null,
+          overIndex: null,
+        });
+      };
+      if (!draggingCardId || !fromColumnId) return clearDrag();
 
       const targetColumnId = dropColumnId;
       // Sempre ler o board atual do cache — `columns` do render pode estar stale.
@@ -4087,7 +4168,7 @@ function KanbanPage() {
         queryClient.getQueryData<KanbanBoard>(kanbanBoardQueryKey) ??
         (boardScopeKey ? readKanbanBoardCache(boardScopeKey) : undefined);
       const targetColumn = boardNow?.columns.find((col) => col.id === targetColumnId);
-      if (!targetColumn) return;
+      if (!targetColumn) return clearDrag();
 
       // Índice vem da lista filtrada — mapeia para a coluna completa.
       const filteredCards = targetColumn.cards.filter((card) => {
@@ -4131,7 +4212,7 @@ function KanbanPage() {
 
       const currentIndex = targetColumn.cards.findIndex((card) => card.id === draggingCardId);
       if (fromColumnId === targetColumnId && currentIndex === desiredPosition) {
-        return;
+        return clearDrag();
       }
 
       const previousBoard = queryClient.getQueryData<KanbanBoard>(kanbanBoardQueryKey);
@@ -4142,22 +4223,27 @@ function KanbanPage() {
         ? captureKanbanReorderRects(boardCardsRef.current, 'data-kanban-card-id')
         : new Map<string, DOMRect>();
 
-      queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) => {
-        const next = moveCardInBoardCache(
-          old,
-          draggingCardId,
-          fromColumnId,
-          targetColumnId,
-          rawDropIndex,
-        );
-        if (next && boardScopeKey) writeKanbanBoardCache(boardScopeKey, next);
-        return next;
+      cardDropPendingRef.current = true;
+      notifyManager.batch(() => {
+        queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) => {
+          const next = moveCardInBoardCache(
+            old,
+            draggingCardId,
+            fromColumnId,
+            targetColumnId,
+            rawDropIndex,
+          );
+          if (next && boardScopeKey) writeKanbanBoardCache(boardScopeKey, next);
+          return next;
+        });
+        notifyManager.schedule(clearDrag);
       });
       scheduleKanbanReorderAnimation(
         boardCardsRef.current,
         beforeRects,
         'data-kanban-card-id',
         'kanban-card-reordering',
+        draggingCardId,
       );
 
       void (async () => {
@@ -4655,32 +4741,41 @@ function KanbanPage() {
             'mb-[-1rem] h-[calc(100dvh-5rem)] overflow-hidden lg:mb-[-2rem] lg:h-[calc(100dvh-6rem)]',
         )}
       >
+        {breadcrumbSlot
+          ? createPortal(
+              <>
+                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-gray-400 dark:text-gray-500" aria-hidden />
+                <KanbanBoardPicker
+                  boards={boardsList ?? []}
+                  currentDepartmentKey={board?.departmentKey}
+                  currentBoardLabel={board?.department}
+                  defaultDepartmentKey={defaultDepartmentKey}
+                  canCreateBoard={!isAdministrator}
+                  isAdministrator={isAdministrator}
+                  onSelect={openBoard}
+                  onSetDefault={setAsDefaultBoard}
+                  onCreateBoard={() => setCreateBoardOpen(true)}
+                  onShare={(b) =>
+                    setShareTarget({ boardId: b.id, boardName: b.department })
+                  }
+                  onEditName={(b) =>
+                    setRenameBoardTarget({ boardId: b.id, name: b.department })
+                  }
+                  onDeleteBoard={setBoardDeleteTarget}
+                  onDuplicate={(b) => setDuplicateBoardTarget({ boardId: b.id, name: b.department })}
+                  archivedBoards={archivedBoardsList ?? []}
+                  onRestoreBoard={handleRestoreBoard}
+                />
+              </>,
+              breadcrumbSlot,
+            )
+          : null}
+
         {/* ── Toolbar ── */}
         <div className="flex-shrink-0 px-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             {/* Esquerda: visão + quadros */}
             <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <KanbanBoardPicker
-                boards={boardsList ?? []}
-                currentDepartmentKey={board?.departmentKey}
-                currentBoardLabel={board?.department}
-                defaultDepartmentKey={defaultDepartmentKey}
-                canCreateBoard={!isAdministrator}
-                isAdministrator={isAdministrator}
-                onSelect={openBoard}
-                onSetDefault={setAsDefaultBoard}
-                onCreateBoard={() => setCreateBoardOpen(true)}
-                onShare={(b) =>
-                  setShareTarget({ boardId: b.id, boardName: b.department })
-                }
-                onEditName={(b) =>
-                  setRenameBoardTarget({ boardId: b.id, name: b.department })
-                }
-                onDeleteBoard={setBoardDeleteTarget}
-                onDuplicate={(b) => setDuplicateBoardTarget({ boardId: b.id, name: b.department })}
-                archivedBoards={archivedBoardsList ?? []}
-                onRestoreBoard={handleRestoreBoard}
-              />
               <KanbanPresenceBar
                 users={presencaUsuarios}
                 selfId={presencaMeuId}

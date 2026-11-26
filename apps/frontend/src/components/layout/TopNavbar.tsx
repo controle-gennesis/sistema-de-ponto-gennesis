@@ -287,7 +287,8 @@ export function TopNavbar({
         </button>
 
         {/* Breadcrumb — no mobile só o último item */}
-        <div className="flex min-w-0 flex-1 items-center gap-2">
+        {/* Com algo no espaço extra (ex.: seletor de quadro do Tasks), o nome da página fica cinza. */}
+        <div className="flex min-w-0 flex-1 items-center gap-2 [&:has(#app-breadcrumb-slot:not(:empty))_[aria-current=page]>span]:font-normal [&:has(#app-breadcrumb-slot:not(:empty))_[aria-current=page]>span]:text-gray-400">
           {backLink ? (
             <Link
               href={backLink.href}
@@ -298,7 +299,7 @@ export function TopNavbar({
               <ArrowLeft className="h-4 w-4" />
             </Link>
           ) : null}
-          <nav aria-label="Breadcrumb" className="min-w-0 max-w-full flex-1">
+          <nav aria-label="Breadcrumb" className="min-w-0 max-w-full flex-1 [&:has(+#app-breadcrumb-slot:not(:empty))]:flex-none">
             {/* px/py + margens negativas: folga para o crumb "crescer" ao receber um item arrastado sem ser cortado */}
             <ol className="-mx-2 -my-1.5 flex min-w-0 items-center gap-1 overflow-hidden px-2 py-1.5 text-sm">
               {breadcrumbs.length === 0 ? (
@@ -398,6 +399,8 @@ export function TopNavbar({
               )}
             </ol>
           </nav>
+          {/* Preenchido pela própria página (portal). */}
+          <div id="app-breadcrumb-slot" className="flex min-w-0 flex-1 items-center gap-1 empty:hidden" />
         </div>
 
         {/* Busca + ações + perfil */}
