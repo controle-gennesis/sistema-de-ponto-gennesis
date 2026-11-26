@@ -1735,6 +1735,7 @@ function serializeDailyMeasurement(row: {
     name: string;
     plannedValue?: Prisma.Decimal | null;
     costCenter?: { id: string; name: string } | null;
+    contract?: { id: string; name: string; number: string } | null;
   } | null;
   contract?: {
     id: string;
@@ -1742,7 +1743,7 @@ function serializeDailyMeasurement(row: {
     number: string;
     costCenter?: { id: string; name: string } | null;
   } | null;
-  workers?: Array<{ id: string; teamMemberId: string | null; name: string; role: string }>;
+  workers?:Array<{ id: string; teamMemberId: string | null; name: string; role: string }>;
 }) {
   const serviceName = row.empreiteiroContract?.name || row.contract?.name || '';
   const centroCustoNome =
@@ -1772,8 +1773,10 @@ function serializeDailyMeasurement(row: {
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     contratoNome: serviceName,
+    /** Contrato do sistema (obra) do serviço medido. */
+    obraContratoNome: row.empreiteiroContract?.contract?.name || row.contract?.name || '',
     centroCustoNome,
-    workers: (row.workers ?? []).map((worker) => ({
+    workers:(row.workers ?? []).map((worker) => ({
       id: worker.id,
       teamMemberId: worker.teamMemberId,
       name: worker.name,
@@ -1790,6 +1793,7 @@ const dailyMeasurementInclude = {
       name: true,
       plannedValue: true,
       costCenter: { select: { id: true, name: true } },
+      contract: { select: { id: true, name: true, number: true } },
     },
   },
   contract: {
@@ -4312,6 +4316,8 @@ export class EmpreiteiroController {
             select: {
               id: true,
               name: true,
+              contract: { select: { id: true, name: true, number: true } },
+              costCenter: { select: { id: true, name: true } },
               empreiteiro: { select: { id: true, name: true, specialty: true } },
             },
           },
@@ -4341,6 +4347,8 @@ export class EmpreiteiroController {
             empreiteiroId: row.empreiteiroContract.empreiteiro.id,
             empreiteiroContractId: row.empreiteiroContractId,
             serviceName: row.empreiteiroContract.name,
+            obraContratoNome: row.empreiteiroContract.contract?.name || '',
+            centroCustoNome: row.empreiteiroContract.costCenter?.name || '',
             empreiteiro: {
               id: row.empreiteiroContract.empreiteiro.id,
               name: row.empreiteiroContract.empreiteiro.name,

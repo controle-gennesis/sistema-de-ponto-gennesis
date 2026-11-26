@@ -19,7 +19,6 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
 import {
   Archive,
-  ArrowRightLeft,
   Check,
   ChevronDown,
   Copy,
@@ -46,11 +45,12 @@ import { firstName } from '../../components/KanbanPresenceBar';
 import AppHeader from '../../components/AppHeader';
 import KanbanMaterialsSheet from '../../components/KanbanMaterialsSheet';
 import KanbanSheet from '../../components/KanbanSheet';
+import KanbanCoverSheet from '../../components/KanbanCoverSheet';
+import KanbanMoveSheet from '../../components/KanbanMoveSheet';
 import { MemberAvatar, MemberPickerSheet } from '../../components/KanbanMemberUi';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { describeCardActivity } from '../../lib/kanbanActivity';
-import { coverHex, KANBAN_COVER_COLORS, normalizeCoverSize } from '../../lib/kanbanCover';
 import {
   addKanbanCardMember,
   addKanbanLinkAttachment,
@@ -976,18 +976,6 @@ export default function KanbanCardScreen() {
             contentContainerStyle={styles.prioRow}
             style={styles.prioScroll}
           >
-            <TouchableOpacity
-              style={[styles.prioChip, styles.coverChip]}
-              onPress={() => setCoverOpen(true)}
-              disabled={readOnly}
-            >
-              {coverHex(card.coverColor) ? (
-                <View style={[styles.coverDot, { backgroundColor: coverHex(card.coverColor) ?? undefined }]} />
-              ) : (
-                <Palette size={13} color={colors.textSecondary} />
-              )}
-              <Text style={styles.prioText}>Capa</Text>
-            </TouchableOpacity>
             {PRIORITIES.map((p) => (
               <TouchableOpacity
                 key={p}
@@ -1117,6 +1105,14 @@ export default function KanbanCardScreen() {
               if (readOnly) return;
               setShowAttachmentsPanel((v) => !v);
             }}
+          />
+          <ActionButton
+            label="Capa"
+            icon={Palette}
+            active={!!card.coverColor}
+            colors={colors}
+            disabled={readOnly}
+            onPress={() => setCoverOpen(true)}
           />
         </View>
 
@@ -1603,55 +1599,13 @@ export default function KanbanCardScreen() {
         />
       ) : null}
 
-      <KanbanSheet
+      <KanbanCoverSheet
         visible={coverOpen}
         onClose={() => setCoverOpen(false)}
-        title="Capa"
-        subtitle="Dê uma cor ao card"
-        icon={Palette}
-      >
-        <View style={styles.coverGrid}>
-          {KANBAN_COVER_COLORS.map((c) => (
-            <TouchableOpacity
-              key={c.key}
-              style={[styles.coverSwatch, { backgroundColor: c.hex }, card.coverColor === c.key && styles.coverSwatchActive]}
-              onPress={() => void saveCover(c.key, normalizeCoverSize(card.coverSize))}
-              accessibilityLabel={c.label}
-            >
-              {card.coverColor === c.key ? <Check size={18} color="#fff" /> : null}
-            </TouchableOpacity>
-          ))}
-        </View>
-        {card.coverColor ? (
-          <>
-            <View style={styles.coverSizeRow}>
-              {(['NORMAL', 'FULL'] as const).map((sz) => (
-                <TouchableOpacity
-                  key={sz}
-                  style={[styles.prioChip, { flex: 1, alignItems: 'center' }, normalizeCoverSize(card.coverSize) === sz && styles.prioChipActive]}
-                  onPress={() => void saveCover(card.coverColor ?? null, sz)}
-                >
-                  <Text style={[styles.prioText, normalizeCoverSize(card.coverSize) === sz && styles.prioTextActive]}>
-                    {sz === 'NORMAL' ? 'Faixa' : 'Card inteiro'}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            <TouchableOpacity
-              style={styles.coverRemove}
-              onPress={() => {
-                void saveCover(null, 'NORMAL');
-                setCoverOpen(false);
-              }}
-            >
-              <Text style={styles.coverRemoveText}>Remover capa</Text>
-            </TouchableOpacity>
-          </>
-        ) : null}
-        <TouchableOpacity style={styles.primaryBtn} onPress={() => setCoverOpen(false)}>
-          <Text style={styles.primaryBtnText}>Concluído</Text>
-        </TouchableOpacity>
-      </KanbanSheet>
+        coverColor={card.coverColor}
+        coverSize={card.coverSize}
+        onSave={saveCover}
+      />
 
       <KanbanSheet
         visible={labelsOpen}
@@ -1733,54 +1687,15 @@ export default function KanbanCardScreen() {
         </TouchableOpacity>
       </KanbanSheet>
 
-      <KanbanSheet
+      <KanbanMoveSheet
         visible={moveOpen}
         onClose={() => setMoveOpen(false)}
-        title="Mover para"
-        subtitle="Escolha a coluna do card"
-        icon={ArrowRightLeft}
-      >
-        <ScrollView style={styles.sheetScroll} showsVerticalScrollIndicator={false}>
-          {(boardQuery.data?.columns ?? []).map((col) => (
-            <TouchableOpacity
-              key={col.id}
-              style={[
-                styles.moveRow,
-                { backgroundColor: columnTint(col.color, isDark) },
-                col.id === card.columnId && { borderColor: col.color || colors.primary },
-              ]}
-              activeOpacity={0.8}
-              onPress={() => void moveTo(col.id)}
-            >
-              <View style={[styles.colDot, { backgroundColor: col.color || colors.primary }]} />
-              <Text style={styles.moveText} numberOfLines={1}>
-                {col.title}
-              </Text>
-              {col.id === card.columnId ? (
-                <Check size={16} color={col.color || colors.primary} strokeWidth={3} />
-              ) : null}
-              <Text style={styles.moveCount}>{(col.cards ?? []).length}</Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </KanbanSheet>
+        columns={boardQuery.data?.columns ?? []}
+        currentColumnId={card.columnId}
+        onMove={moveTo}
+      />
     </View>
   );
-}
-
-/** Fundo da linha = cor da coluna misturada ao fundo (mesmo mix do quadro). */
-function columnTint(color: string | null | undefined, isDark: boolean): string {
-  const raw = (color || '#6B7280').replace('#', '');
-  const hex = raw.length === 3 ? raw.split('').map((c) => c + c).join('') : raw;
-  const n = parseInt(hex, 16);
-  const accent = Number.isNaN(n)
-    ? { r: 107, g: 114, b: 128 }
-    : { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
-  const base = isDark ? { r: 31, g: 41, b: 55 } : { r: 255, g: 255, b: 255 };
-  const w = isDark ? 0.28 : 0.22;
-  const mix = (a: number, b: number) => Math.round(a * w + b * (1 - w));
-  const h = (v: number) => v.toString(16).padStart(2, '0');
-  return `#${h(mix(accent.r, base.r))}${h(mix(accent.g, base.g))}${h(mix(accent.b, base.b))}`;
 }
 
 function formatRelativeTime(iso: string): string {
@@ -1896,14 +1811,6 @@ function getStyles(colors: any, _isDark: boolean) {
       backgroundColor: colors.primary,
       borderColor: colors.primary,
     },
-    coverChip: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-    coverDot: { width: 13, height: 13, borderRadius: 4 },
-    coverGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 14 },
-    coverSwatch: { width: 52, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-    coverSwatchActive: { borderWidth: 2, borderColor: colors.text },
-    coverSizeRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },
-    coverRemove: { alignItems: 'center', paddingVertical: 10, marginBottom: 6 },
-    coverRemoveText: { color: colors.primary, fontWeight: '700', fontSize: 13 },
     prioText: { fontSize: 11, fontWeight: '700', color: colors.textSecondary },
     prioTextActive: { color: '#fff' },
     titleRow: {
@@ -2366,24 +2273,5 @@ function getStyles(colors: any, _isDark: boolean) {
       fontSize: 16,
       marginBottom: 10,
     },
-    moveRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
-      paddingVertical: 14,
-      paddingHorizontal: 14,
-      borderRadius: 14,
-      borderWidth: 1.5,
-      borderColor: 'transparent',
-      marginBottom: 8,
-    },
-    moveCount: {
-      minWidth: 24,
-      textAlign: 'right',
-      fontSize: 14,
-      fontWeight: '700',
-      color: colors.textSecondary,
-    },
-    moveText: { flex: 1, fontSize: 15, fontWeight: '600', color: colors.text },
   });
 }

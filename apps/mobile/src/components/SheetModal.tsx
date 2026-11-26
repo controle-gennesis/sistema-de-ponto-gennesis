@@ -173,7 +173,8 @@ export default function SheetModal({
         <Animated.View
           style={{
             transform: [
-              { translateY: slide.interpolate({ inputRange: [0, 1], outputRange: [520, 0] }) },
+              // A altura da tela garante que a folha saia inteira (as altas sobravam e sumiam de uma vez).
+              { translateY: slide.interpolate({ inputRange: [0, 1], outputRange: [windowHeight, 0] }) },
             ],
           }}
         >

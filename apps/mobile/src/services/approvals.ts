@@ -102,6 +102,23 @@ export type MedicaoApprovalRow = {
     contratoNome?: string | null;
   } | null;
   notes?: string | null;
+  /** Dia da entrega (YYYY-MM-DD). */
+  workDate?: string | null;
+  description?: string | null;
+  confirmedBy?: string | null;
+  /** Contrato do sistema (obra). */
+  obraContratoNome?: string | null;
+  centroCustoNome?: string | null;
+  workers?: Array<{ id: string; name: string }>;
+  photos?: Array<{ url: string; name?: string }>;
+  teamPhoto?: { url?: string } | null;
+  serviceFinance?: {
+    contractValue: number;
+    executedTotal: number;
+    paidTotal: number;
+    installmentsCount: number;
+    installmentsPaid: number;
+  } | null;
 };
 
 export type AditivoApprovalRow = {
@@ -119,6 +136,12 @@ export type AditivoApprovalRow = {
   empreiteiroContractId: string;
   serviceName?: string | null;
   empreiteiro?: { id?: string; name?: string; specialty?: string | null } | null;
+  /** Contrato do sistema (obra). */
+  obraContratoNome?: string | null;
+  centroCustoNome?: string | null;
+  files?: Array<{ url: string; name?: string }>;
+  paymentMode?: 'new' | 'redistribute';
+  installments?: number[];
 };
 
 function phaseQuery(phase: ApprovalPhase): string {

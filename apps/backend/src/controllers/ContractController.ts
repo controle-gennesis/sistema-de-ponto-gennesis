@@ -155,6 +155,23 @@ function valorOrcadoFromPleito(p: {
   return 0;
 }
 
+const GASTOS_CACHE_TTL_MS = 15 * 60 * 1000;
+/** Último resultado (ou cálculo em andamento) de gastos operacionais, por configuração de naturezas. */
+let gastosCache: { key: string; at: number; value: Promise<unknown> } | null = null;
+
+function cachedGastos<T>(key: string, build: () => Promise<T>): Promise<T> {
+  if (gastosCache && gastosCache.key === key && Date.now() - gastosCache.at < GASTOS_CACHE_TTL_MS) {
+    return gastosCache.value as Promise<T>;
+  }
+  const entry = { key, at: Date.now(), value: build() as Promise<unknown> };
+  gastosCache = entry;
+  // Erro não fica guardado: o próximo pedido tenta de novo.
+  entry.value.catch(() => {
+    if (gastosCache === entry) gastosCache = null;
+  });
+  return entry.value as Promise<T>;
+}
+
 export class ContractController {
   /**
    * Listar todos os contratos
@@ -863,18 +880,21 @@ export class ContractController {
       }
 
       try {
-        const result = await svc.listGastosOperacionaisDetailRows();
-        const detailRows = await enrichGastosPoloFromCostCenters(result.detailRows);
-        res.json({
-          success: true,
-          data: {
+        const { getGastosNaturezasConfigHash } = await import(
+          '../services/gastosOperacionaisNaturezasConfigStore'
+        );
+        const configHash = getGastosNaturezasConfigHash();
+        // Montar este relatório é pesado e trava o servidor enquanto calcula: o resultado é reaproveitado
+        // e quem pedir durante o cálculo espera o mesmo, em vez de começar outro.
+        const data = await cachedGastos(configHash, async () => {
+          const result = await svc.listGastosOperacionaisDetailRows();
+          const detailRows = await enrichGastosPoloFromCostCenters(result.detailRows);
+          return {
             configured: true,
             detailRows,
             naturezaDetailRows: result.naturezaDetailRows,
             totvsNaturezaCatalog: result.totvsNaturezaCatalog,
-            naturezasConfigHash: (
-              await import('../services/gastosOperacionaisNaturezasConfigStore')
-            ).getGastosNaturezasConfigHash(),
+            naturezasConfigHash: configHash,
             fetchedAt: new Date().toISOString(),
             costCenterCount: result.costCenterCount,
             totalRowCount: result.totalRowCount,
@@ -882,8 +902,9 @@ export class ContractController {
             valueColumn: result.valueColumn,
             dateColumn: result.dateColumn,
             poloColumn: result.poloColumn
-          }
+          };
         });
+        res.json({ success: true, data });
       } catch (err) {
         const message = svc.formatAxiosError(err);
         console.warn(`[TOTVS RM GASTOS OPERACIONAIS]: ${message}`);

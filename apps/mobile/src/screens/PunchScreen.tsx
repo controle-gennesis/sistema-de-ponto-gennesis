@@ -813,7 +813,7 @@ export default function PunchScreen() {
   const punchInOut = async () => {
     if (!methodDone) {
       Alert.alert(
-        bothAllowed ? 'Confirmação' : qrAllowed ? 'QR da localidade' : 'Conferência facial',
+        bothAllowed ? 'Confirmação' : qrAllowed ? 'QR Code' : 'Conferência facial',
         bothAllowed
           ? 'Abra a câmera e confirme o rosto ou leia o QR da localidade.'
           : qrAllowed
@@ -1278,7 +1278,7 @@ export default function PunchScreen() {
 
         <View style={styles.box}>
           <FormFieldLabel
-            label={bothAllowed ? 'Confirmação' : qrAllowed ? 'QR da localidade' : 'Conferência do rosto'}
+            label={bothAllowed ? 'Confirmação' : qrAllowed ? 'QR Code' : 'Conferência do rosto'}
             required
             style={styles.boxTitle}
           />
@@ -1330,7 +1330,7 @@ export default function PunchScreen() {
                       : 'Ler de novo'
                     : faceAllowed
                       ? 'Abrir câmera'
-                      : 'Ler QR da localidade'}
+                      : 'Ler QR Code'}
                 </Text>
               </View>
             </TouchableOpacity>

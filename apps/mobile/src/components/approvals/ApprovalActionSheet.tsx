@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -50,6 +50,7 @@ import {
   type OcApprovalRow,
 } from '../../services/approvals';
 import {
+  formatApprovalDate,
   formatApprovalMoney,
   parseApprovalMoneyInput,
   type ApprovalListItem,
@@ -97,11 +98,15 @@ function DetailField({
 
 export default function ApprovalActionSheet({
   visible,
-  tab,
-  item,
+  tab: tabProp,
+  item: itemProp,
   onClose,
   embedded = false,
 }: Props) {
+  // Ao fechar, quem chama zera o item na hora: guarda o último para a folha descer com o conteúdo.
+  const lastRef = useRef({ tab: tabProp, item: itemProp });
+  if (itemProp) lastRef.current = { tab: tabProp, item: itemProp };
+  const { tab, item } = lastRef.current;
   const { colors, isDark } = useTheme();
   const styles = useMemo(() => getStyles(colors, isDark), [colors, isDark]);
   const queryClient = useQueryClient();
@@ -174,6 +179,13 @@ export default function ApprovalActionSheet({
     [fdRaw],
   );
   const aditivoRaw = tab === 'aditivo' && item ? (item.raw as AditivoApprovalRow) : null;
+  const medicaoRaw = tab === 'medicao' && item ? (item.raw as MedicaoApprovalRow) : null;
+  // Fotos da medição e documentos do aditivo (contrato atualizado), abertos com o mesmo leitor da FD.
+  const empreitaAnexos = [
+    ...(medicaoRaw?.teamPhoto?.url ? [{ url: medicaoRaw.teamPhoto.url, name: 'Foto da equipe.jpg' }] : []),
+    ...(medicaoRaw?.photos ?? []),
+    ...(aditivoRaw?.files ?? []),
+  ].filter((a) => a && a.url);
   const employeesQuery = useQuery({
     queryKey: ['payroll-employees'],
     queryFn: fetchPayrollEmployees,
@@ -199,11 +211,8 @@ export default function ApprovalActionSheet({
   }, [dpRaw, employeeNameById]);
 
   useEffect(() => {
-    if (!visible || !item) {
-      setComment('');
-      setMedicaoAmount('');
-      return;
-    }
+    // Fechando não limpa os campos: eles continuam na tela até a folha sair.
+    if (!visible || !item) return;
     setComment('');
     if (tab === 'medicao') {
       const raw = item.raw as MedicaoApprovalRow;
@@ -308,7 +317,7 @@ export default function ApprovalActionSheet({
 
   // Mesma folha das outras janelas de detalhes (SheetModal); `embedded` quando já está dentro de outra folha.
   return (
-    <SheetModal visible={visible && !!item} onClose={onClose} title={headerTitle} embedded={embedded}>
+    <SheetModal visible={visible && !!itemProp} onClose={onClose} title={headerTitle} embedded={embedded}>
       {item ? (
         <View>
           {dpRaw ? (
@@ -403,7 +412,56 @@ export default function ApprovalActionSheet({
             </View>
           ) : null}
 
-          {!dpRaw && !fuelRaw && !fdRaw && !aditivoRaw ? (
+          {medicaoRaw ? (
+            <View style={styles.detailGrid}>
+              <DetailField styles={styles} label="Contrato" value={medicaoRaw.obraContratoNome?.trim() || '—'} />
+              <DetailField styles={styles} label="Serviço" value={medicaoRaw.contratoNome?.trim() || '—'} />
+              {medicaoRaw.centroCustoNome?.trim() ? (
+                <DetailField styles={styles} label="Centro de custo" value={medicaoRaw.centroCustoNome.trim()} />
+              ) : null}
+              <DetailField styles={styles} label="Entrega em" value={formatApprovalDate(medicaoRaw.workDate)} />
+              <DetailField styles={styles} label="Descrição" value={medicaoRaw.description?.trim() || '—'} />
+              {medicaoRaw.serviceFinance ? (
+                <>
+                  <DetailField
+                    styles={styles}
+                    label="Valor do contrato (com aditivos)"
+                    value={formatApprovalMoney(medicaoRaw.serviceFinance.contractValue)}
+                  />
+                  <DetailField
+                    styles={styles}
+                    label="Já executado"
+                    value={formatApprovalMoney(medicaoRaw.serviceFinance.executedTotal)}
+                  />
+                  <DetailField
+                    styles={styles}
+                    label="Já pago"
+                    value={formatApprovalMoney(medicaoRaw.serviceFinance.paidTotal)}
+                  />
+                  <DetailField
+                    styles={styles}
+                    label="Saldo a executar"
+                    value={formatApprovalMoney(
+                      Math.max(0, medicaoRaw.serviceFinance.contractValue - medicaoRaw.serviceFinance.executedTotal),
+                    )}
+                  />
+                  <DetailField
+                    styles={styles}
+                    label="Parcelas pagas"
+                    value={`${medicaoRaw.serviceFinance.installmentsPaid} de ${medicaoRaw.serviceFinance.installmentsCount}`}
+                  />
+                </>
+              ) : null}
+              <DetailField styles={styles} label="Confirmado por" value={medicaoRaw.confirmedBy?.trim() || '—'} />
+              <DetailField
+                styles={styles}
+                label="Equipe"
+                value={medicaoRaw.workers?.length ? medicaoRaw.workers.map((w) => w.name).join(', ') : '—'}
+              />
+            </View>
+          ) : null}
+
+          {!dpRaw && !fuelRaw && !fdRaw && !aditivoRaw && !medicaoRaw ? (
             <View style={styles.detailGrid}>
               {item.subtitle ? (
                 <DetailField styles={styles} label="Detalhe" value={item.subtitle} />
@@ -423,7 +481,24 @@ export default function ApprovalActionSheet({
                 label="Empreiteiro"
                 value={aditivoRaw.empreiteiro?.name?.trim() || '—'}
               />
+              <DetailField styles={styles} label="Contrato" value={aditivoRaw.obraContratoNome?.trim() || '—'} />
               <DetailField styles={styles} label="Serviço" value={aditivoRaw.serviceName?.trim() || '—'} />
+              {aditivoRaw.centroCustoNome?.trim() ? (
+                <DetailField styles={styles} label="Centro de custo" value={aditivoRaw.centroCustoNome.trim()} />
+              ) : null}
+              {aditivoRaw.paymentMode ? (
+                <DetailField
+                  styles={styles}
+                  label="Forma de pagamento"
+                  value={
+                    aditivoRaw.paymentMode === 'redistribute'
+                      ? 'Redistribuído nas parcelas em aberto'
+                      : aditivoRaw.installments?.length
+                        ? `Parcela(s) nova(s): ${aditivoRaw.installments.map((v) => formatApprovalMoney(v)).join(', ')}`
+                        : 'Sem parcela nova (valor reduzido)'
+                  }
+                />
+              ) : null}
               <DetailField
                 styles={styles}
                 label="Valor do aditivo"
@@ -557,6 +632,62 @@ export default function ApprovalActionSheet({
                   </Modal>
                 </View>
               ) : null}
+            </View>
+          ) : null}
+
+          {empreitaAnexos.length > 0 ? (
+            <View style={{ marginTop: 12, gap: 8 }}>
+              <Text style={styles.detailLabel}>{aditivoRaw ? 'Contrato atualizado / anexos' : 'Fotos e anexos'}</Text>
+              {empreitaAnexos.map((a, i) => (
+                <TouchableOpacity
+                  key={`${a.url}-${i}`}
+                  style={styles.fdAnexoRow}
+                  activeOpacity={0.7}
+                  disabled={baixandoAnexo != null}
+                  onPress={() => {
+                    const href = resolveMediaUrl(a.url);
+                    if (href) void verAnexo(href, a.name?.trim() || 'arquivo');
+                  }}
+                >
+                  <View style={styles.fdAnexoMain}>
+                    <Paperclip size={16} color={colors.textSecondary} />
+                    <Text style={[styles.fdAnexoName, { flex: 1 }]} numberOfLines={2}>
+                      {a.name?.trim() || 'Arquivo'}
+                    </Text>
+                  </View>
+                  <View style={styles.fdAnexoDownload}>
+                    {baixandoAnexo === resolveMediaUrl(a.url) ? (
+                      <ActivityIndicator size="small" color={colors.primary} />
+                    ) : (
+                      <Download size={18} color={colors.primary} />
+                    )}
+                  </View>
+                </TouchableOpacity>
+              ))}
+              <Modal
+                visible={anexoImagem != null}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setAnexoImagem(null)}
+              >
+                <View style={styles.fdImgBackdrop}>
+                  <View style={styles.fdImgBar}>
+                    <Text style={styles.fdImgTitle} numberOfLines={1}>
+                      {anexoImagem?.nome}
+                    </Text>
+                    <TouchableOpacity
+                      style={styles.fdImgBtn}
+                      accessibilityLabel="Fechar"
+                      onPress={() => setAnexoImagem(null)}
+                    >
+                      <XIcon size={22} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
+                  {anexoImagem ? (
+                    <Image source={{ uri: anexoImagem.href }} style={styles.fdImg} resizeMode="contain" />
+                  ) : null}
+                </View>
+              </Modal>
             </View>
           ) : null}
 

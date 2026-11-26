@@ -269,7 +269,9 @@ const corsOptions = {
   ],
   exposedHeaders: ['Content-Range', 'X-Content-Range', 'X-Skipped-Order-Numbers'],
   optionsSuccessStatus: 204,
-  preflightContinue: false
+  preflightContinue: false,
+  // O navegador guarda a checagem prévia (OPTIONS) em vez de repetir antes de cada requisição.
+  maxAge: 86400
 };
 
 // Aplicar CORS ANTES de qualquer outro middleware

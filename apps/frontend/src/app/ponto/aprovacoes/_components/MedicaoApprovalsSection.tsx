@@ -115,6 +115,11 @@ function contractLabel(item: ReviewItem) {
   return item.contratoNome || item.empreiteiro?.contratoNome || '—';
 }
 
+/** Contrato do sistema (obra); `contractLabel` é o nome do contrato de serviço da empreita. */
+function obraLabel(item: ReviewItem) {
+  return item.obraContratoNome || '—';
+}
+
 export function MedicaoApprovalsSection() {
   const queryClient = useQueryClient();
   const [phase, setPhase] = useState<ReviewPhase>('PENDING');
@@ -154,6 +159,7 @@ export function MedicaoApprovalsSection() {
           row.empreiteiro?.name,
           row.description,
           contractLabel(row),
+          row.obraContratoNome,
           row.centroCustoNome,
           row.confirmedBy,
           row.approvedBy,
@@ -379,12 +385,15 @@ export function MedicaoApprovalsSection() {
                           title={item.description}
                         >
                           {item.description || '—'}
+                          <span className="block truncate text-xs text-gray-500 dark:text-gray-400">
+                            {contractLabel(item)}
+                          </span>
                         </td>
                         <td
                           className="max-w-[200px] truncate px-3 py-3 align-middle text-sm text-gray-700 dark:text-gray-300 sm:px-6"
-                          title={contractLabel(item)}
+                          title={obraLabel(item)}
                         >
-                          {contractLabel(item)}
+                          {obraLabel(item)}
                         </td>
                         <td className="whitespace-nowrap px-3 py-3 align-middle text-sm text-gray-700 dark:text-gray-300 sm:px-6">
                           {formatDateBr(item.workDate)}
@@ -524,6 +533,7 @@ export function MedicaoApprovalsSection() {
             ) : null}
 
             <div className="grid grid-cols-1 gap-x-6 gap-y-3 rounded-xl border border-gray-200 p-4 dark:border-gray-700 sm:grid-cols-2">
+              <DetailField label="Contrato" value={obraLabel(detail)} />
               <DetailField label="Confirmado por" value={detail.confirmedBy || '—'} />
               <DetailField
                 label="Equipe"

@@ -48,6 +48,8 @@ type AddendumReviewItem = {
   empreiteiroId: string;
   empreiteiroContractId: string;
   serviceName: string;
+  obraContratoNome?: string | null;
+  centroCustoNome?: string | null;
   empreiteiro: { id: string; name: string; specialty?: string | null };
   paymentMode: 'new' | 'redistribute';
   installments: number[];
@@ -147,7 +149,7 @@ export function AditivoApprovalsSection() {
     if (!term) return byPhase;
     return byPhase.filter((row) =>
       textMatchesSearch(
-        [row.empreiteiro?.name, row.serviceName, row.reason, row.createdByName, row.approvedByName]
+        [row.empreiteiro?.name, row.serviceName, row.obraContratoNome, row.reason, row.createdByName, row.approvedByName]
           .filter(Boolean)
           .join(' '),
         term,
@@ -302,7 +304,7 @@ export function AditivoApprovalsSection() {
                       <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                         ID
                       </th>
-                      {['Empreita', 'Serviço', 'Aditivo', 'Data', 'Valor', APPROVAL_STATUS_COLUMN_TITLE, 'Ação'].map(
+                      {['Empreita', 'Serviço', 'Contrato', 'Aditivo', 'Data', 'Valor', APPROVAL_STATUS_COLUMN_TITLE, 'Ação'].map(
                         (label) => (
                           <th
                             key={label}
@@ -338,6 +340,12 @@ export function AditivoApprovalsSection() {
                           title={item.serviceName}
                         >
                           {item.serviceName || '—'}
+                        </td>
+                        <td
+                          className="max-w-[200px] truncate px-3 py-3 align-middle text-sm text-gray-700 dark:text-gray-300 sm:px-6"
+                          title={item.obraContratoNome || undefined}
+                        >
+                          {item.obraContratoNome || '—'}
                         </td>
                         <td className="whitespace-nowrap px-3 py-3 align-middle text-sm text-gray-700 dark:text-gray-300 sm:px-6">
                           {item.number}º aditivo
@@ -415,6 +423,8 @@ export function AditivoApprovalsSection() {
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <DetailField label="Empreita" value={detail.empreiteiro?.name || ''} />
               <DetailField label="Serviço" value={detail.serviceName} />
+              <DetailField label="Contrato" value={detail.obraContratoNome || '—'} />
+              {detail.centroCustoNome ? <DetailField label="Centro de custo" value={detail.centroCustoNome} /> : null}
               <DetailField label="Data do aditivo" value={formatDateBr(detail.effectiveDate)} />
               <DetailField label="Valor" value={formatMoney(detail.amount)} />
               <DetailField label="Lançado por" value={detail.createdByName || '—'} />

@@ -102,9 +102,11 @@ function itemDateLabel(item: ApprovalListItemWithTab): string {
     refuelDate?: string | null;
     requestedAt?: string | null;
     measurementDate?: string | null;
+    workDate?: string | null;
   };
   const date =
     raw.measurementDate ||
+    raw.workDate ||
     raw.refuelDate ||
     raw.requestedAt ||
     raw.createdAt ||

@@ -57,6 +57,9 @@ export type OcPermissionFlags = {
 
 export function formatApprovalDate(value?: string | null): string {
   if (!value) return '—';
+  // Data sem hora (YYYY-MM-DD): `new Date` leria como UTC e mostraria o dia anterior no Brasil.
+  const soDia = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (soDia) return `${soDia[3]}/${soDia[2]}/${soDia[1]}`;
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
   return d.toLocaleDateString('pt-BR');
@@ -203,12 +206,14 @@ export async function fetchPendingApprovalsForTab(
         // O número e o tipo já aparecem no topo do cartão (#N e «Medições»): o título diz de quem é.
         title: row.empreiteiro?.name || 'Medição',
         person: null,
-        place: row.contratoNome || row.empreiteiro?.contratoNome || null,
+        place:
+          [row.obraContratoNome, row.contratoNome || row.empreiteiro?.contratoNome].filter(Boolean).join(' · ') ||
+          null,
         subtitle:
           row.contratoNome ||
           row.empreiteiro?.contratoNome ||
           formatApprovalMoney(row.executedAmount),
-        meta: formatApprovalDate(row.measurementDate),
+        meta: formatApprovalDate(row.measurementDate || row.workDate),
         statusLabel: 'Pendente',
         pending: true,
         raw: row,
@@ -224,7 +229,10 @@ export async function fetchPendingApprovalsForTab(
         // O número e o tipo já aparecem no topo do cartão (#N e «Aditivos»): o título diz de quem é.
         title: row.empreiteiro?.name || row.serviceName || 'Aditivo',
         person: null,
-        place: row.serviceName && row.serviceName !== row.empreiteiro?.name ? row.serviceName : null,
+        place:
+          [row.obraContratoNome, row.serviceName !== row.empreiteiro?.name ? row.serviceName : null]
+            .filter(Boolean)
+            .join(' · ') || null,
         subtitle: row.serviceName || row.empreiteiro?.name || formatApprovalMoney(row.amount),
         meta: `${formatApprovalMoney(row.amount)} · ${formatApprovalDate(row.createdAt)}`,
         statusLabel: 'Pendente',

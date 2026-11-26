@@ -35,6 +35,8 @@ export type ServiceFinance = {
 
 type PendingItem = DailyMeasurement & {
   empreiteiroId: string;
+  /** Contrato do sistema (obra) do serviço medido. */
+  obraContratoNome?: string | null;
   /** Resumo financeiro do contrato de serviço (valor, executado, pago, parcelas). */
   serviceFinance?: ServiceFinance | null;
   empreiteiro: {
