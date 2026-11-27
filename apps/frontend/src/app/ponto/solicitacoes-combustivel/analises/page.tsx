@@ -276,6 +276,10 @@ function useChartTheme() {
       color: isDark ? '#f3f4f6' : '#111827',
       fontSize: 12,
     } as React.CSSProperties,
+    // Sem isto o valor sai na cor da barra (ou preto) e some no tema escuro.
+    tipItemStyle: { color: isDark ? '#ffffff' : '#111827', fontWeight: 600 } as React.CSSProperties,
+    /** Faixa de destaque atrás da barra sob o mouse. */
+    barCursor: { fill: 'rgba(128,128,128,0.12)' },
   };
 }
 
@@ -582,6 +586,7 @@ function UrgencyByContractChart({
               />
               <Tooltip
                 contentStyle={theme.tipStyle}
+                itemStyle={theme.tipItemStyle}
                 formatter={(value, _name, item) => {
                   const row = item?.payload as { cota?: number; acima?: number } | undefined;
                   const urgencia = formatCurrency(Number(value ?? 0));
@@ -1480,7 +1485,9 @@ function AnalisesCombustivelContent() {
                   />
                   <Tooltip
                     contentStyle={theme.tipStyle}
+                    itemStyle={theme.tipItemStyle}
                     formatter={(value) => [formatCurrency(Number(value ?? 0)), 'Gasto']}
+                    cursor={theme.barCursor}
                     labelFormatter={(_, payload) =>
                       (payload?.[0]?.payload as { fullName?: string } | undefined)?.fullName ?? ''
                     }
@@ -1551,6 +1558,7 @@ function AnalisesCombustivelContent() {
                   />
                   <Tooltip
                     contentStyle={theme.tipStyle}
+                    itemStyle={theme.tipItemStyle}
                     formatter={(value, name) => {
                       const numValue = Number(value ?? 0);
                       if (name === 'gasto') return [formatCurrency(numValue), 'Gasto'];
@@ -1610,6 +1618,7 @@ function AnalisesCombustivelContent() {
                   />
                   <Tooltip
                     contentStyle={theme.tipStyle}
+                    itemStyle={theme.tipItemStyle}
                     formatter={(value) => [formatPrice(Number(value ?? 0)), 'Preço médio/L']}
                   />
                   <Line
@@ -1659,6 +1668,7 @@ function AnalisesCombustivelContent() {
                   </Pie>
                   <Tooltip
                     contentStyle={theme.tipStyle}
+                    itemStyle={theme.tipItemStyle}
                     formatter={(value) => [formatCurrency(Number(value ?? 0)), 'Gasto']}
                   />
                   <Legend />
