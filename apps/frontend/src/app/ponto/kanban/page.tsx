@@ -1185,7 +1185,7 @@ function KanbanCardItem({
       className={clsx(
         'group relative rounded-2xl border border-transparent p-4',
         coverFull && coverColorHex ? 'text-white' : 'bg-white dark:bg-gray-800',
-        photoFull && 'flex min-h-[170px] flex-col justify-end text-white',
+        photoFull && 'flex min-h-[170px] flex-col text-white',
         menuOpen && 'z-30',
         'cursor-pointer select-none shadow-[0_1px_3px_rgba(0,0,0,0.08)]',
         'transition-[border-color,filter] duration-200 ease-out',
@@ -1222,7 +1222,7 @@ function KanbanCardItem({
           />
           {/* Escurece a foto para o título continuar legível. */}
           <div
-            className="absolute -inset-px rounded-2xl bg-gradient-to-t from-black/80 via-black/40 to-black/10"
+            className="absolute -inset-px rounded-2xl bg-gradient-to-t from-black/80 via-black/30 to-black/60"
             aria-hidden
           />
         </>
@@ -1303,7 +1303,7 @@ function KanbanCardItem({
         </div>
       )}
 
-      <div className="relative z-[1]">
+      <div className={clsx('relative z-[1]', photoFull && 'flex flex-1 flex-col')}>
       {card.labels.length > 0 && (
         <CardLabelsRow labels={card.labels} labelPresets={labelPresets} />
       )}
@@ -1386,7 +1386,8 @@ function KanbanCardItem({
         </p>
       ) : null}
 
-      <div className={coverFull ? '[&_*]:!text-white/90' : undefined}>
+      {/* Foto inteira: etiquetas e título no topo; dados e rodapé encostados embaixo. */}
+      <div className={clsx(coverFull && '[&_*]:!text-white/90', photoFull && 'mt-auto')}>
         <CardMetaRow card={card} />
       </div>
 

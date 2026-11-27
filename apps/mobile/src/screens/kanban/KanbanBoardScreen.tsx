@@ -333,7 +333,7 @@ function BoardCardBase({
       style={[
         styles.card,
         coverFull && coverColorHex ? { backgroundColor: coverColorHex, borderColor: coverColorHex } : null,
-        photoFull ? { minHeight: 170, justifyContent: 'flex-end' } : null,
+        photoFull ? { minHeight: 170 } : null,
         presence && presence.length > 0 ? { borderColor: presence[0].color, borderWidth: 2 } : null,
       ]}
       onPress={() => {
@@ -426,6 +426,9 @@ function BoardCardBase({
           {description}
         </Text>
       ) : null}
+
+      {/* Foto inteira: etiquetas e título no topo; dados e rodapé encostados embaixo. */}
+      {photoFull ? <View style={{ flexGrow: 1 }} /> : null}
 
       <View style={styles.metaRow}>
         <View style={styles.metaLeft}>
