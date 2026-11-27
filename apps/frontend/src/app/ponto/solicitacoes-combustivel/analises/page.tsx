@@ -10,6 +10,7 @@ import {
   Car,
   Droplets,
   Filter,
+  Building2,
   Fuel,
   Gauge,
   Loader2,
@@ -21,6 +22,7 @@ import {
 } from 'lucide-react';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { Modal } from '@/components/ui/Modal';
+import { FilterMultiSelectField } from '@/components/ui/FilterMultiSelectField';
 import {
   downloadFuelAnalysesPdf,
   downloadFuelAnalysesWord,
@@ -261,6 +263,11 @@ function shortContractName(row: FuelRefuelRequest): string {
   const codePrefix = raw.match(/^([\d.]+)\s*[—–-]\s*(.+)$/);
   if (codePrefix?.[2]) return codePrefix[2].trim();
   return raw.length > 28 ? `${raw.slice(0, 26)}…` : raw;
+}
+
+/** Mesmo nome usado nos grupos de cota (nome do contrato; sem contrato, o centro de custo). */
+function contractFilterKey(row: FuelRefuelRequest): string {
+  return row.contract?.name?.trim() || row.contract?.number?.trim() || row.costCenter?.trim() || 'Sem contrato';
 }
 
 function useChartTheme() {
@@ -842,6 +849,8 @@ function AnalisesCombustivelContent() {
   const theme = useChartTheme();
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [selectedContracts, setSelectedContracts] = useState<string[]>([]);
+  const [openFilterField, setOpenFilterField] = useState<'contract' | null>(null);
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [rankDrillDown, setRankDrillDown] = useState<RankDrillDown | null>(null);
@@ -869,7 +878,7 @@ function AnalisesCombustivelContent() {
     staleTime: 15_000,
   });
 
-  const { data: urgencyGroups = [], isLoading: loadingUrgency } = useQuery({
+  const { data: allUrgencyGroups = [], isLoading: loadingUrgency } = useQuery({
     queryKey: ['fuel-urgency-chart', dateFrom, dateTo],
     queryFn: async () => {
       const res = await api.get('/fuel-refuel-requests/quota-urgency-chart', {
@@ -894,9 +903,24 @@ function AnalisesCombustivelContent() {
     return '';
   })();
 
+  const contractOptions = useMemo(() => {
+    const names = new Set<string>(rows.map(contractFilterKey));
+    for (const group of quotaData?.groups ?? []) quotaContractNames(group).forEach((name) => names.add(name));
+    return Array.from(names)
+      .sort((a, b) => a.localeCompare(b, 'pt-BR'))
+      .map((name) => ({ value: name, label: name }));
+  }, [rows, quotaData]);
+
+  /** Grupo de cota entra se algum dos seus contratos estiver selecionado (a cota é dividida). */
+  const matchesContractFilter = (group: FuelQuotaGroup) =>
+    selectedContracts.length === 0 ||
+    quotaContractNames(group).some((name) => selectedContracts.includes(name));
+
+  const urgencyGroups = allUrgencyGroups.filter(matchesContractFilter);
+
   const weeklyQuotaCard = (
     <WeeklyQuotaPanel
-      groups={quotaData?.groups ?? []}
+      groups={(quotaData?.groups ?? []).filter(matchesContractFilter)}
       weekStart={quotaData?.weekStart}
       weekEnd={quotaData?.weekEnd}
       isLoading={loadingQuota}
@@ -904,20 +928,25 @@ function AnalisesCombustivelContent() {
   );
 
   const filteredRows = useMemo(() => {
-    if (!dateFrom && !dateTo) return rows;
+    if (!dateFrom && !dateTo && selectedContracts.length === 0) return rows;
     return rows.filter((row) => {
+      if (selectedContracts.length > 0 && !selectedContracts.includes(contractFilterKey(row))) return false;
+      if (!dateFrom && !dateTo) return true;
       const ymd = resolveRowYmd(row);
       if (!ymd) return false;
       if (dateFrom && ymd < dateFrom) return false;
       if (dateTo && ymd > dateTo) return false;
       return true;
     });
-  }, [rows, dateFrom, dateTo]);
+  }, [rows, dateFrom, dateTo, selectedContracts]);
 
   const insights = useMemo(() => buildInsights(filteredRows), [filteredRows]);
   const hasPeriodFilter = Boolean(dateFrom || dateTo);
+  const hasFilter = hasPeriodFilter || selectedContracts.length > 0;
   const exportReport: FuelAnalysesExport = {
-    periodLabel: urgencyPeriodLabel || 'Todo o período',
+    periodLabel: [urgencyPeriodLabel || 'Todo o período', selectedContracts.join(', ')]
+      .filter(Boolean)
+      .join(' · '),
     summary: [
       { label: 'Gasto total', value: formatCurrency(insights.totalSpend) },
       { label: 'Litros abastecidos', value: formatLiters(insights.totalLiters) },
@@ -1215,15 +1244,15 @@ function AnalisesCombustivelContent() {
           type="button"
           onClick={() => setIsFiltersModalOpen(true)}
           className={`${cadastroListClasses.filterIconButton} transition-colors ${
-            hasPeriodFilter
+            hasFilter
               ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
               : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
           }`}
           aria-label="Abrir filtros"
-          title={hasPeriodFilter ? 'Filtros ativos' : 'Filtros'}
+          title={hasFilter ? 'Filtros ativos' : 'Filtros'}
         >
           <Filter className="h-4 w-4" />
-          {hasPeriodFilter ? (
+          {hasFilter ? (
             <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
           ) : null}
         </button>
@@ -1320,12 +1349,29 @@ function AnalisesCombustivelContent() {
             />
           </div>
         </div>
+        <FilterMultiSelectField
+          fieldKey="contract"
+          label="Contrato"
+          icon={Building2}
+          options={contractOptions}
+          selected={selectedContracts}
+          onChange={setSelectedContracts}
+          openField={openFilterField}
+          onOpenField={setOpenFilterField}
+          placeholder="Todos os contratos"
+          searchPlaceholder="Buscar contrato"
+          emptyOptionsMessage="Nenhum contrato disponível."
+          emptySearchMessage="Nenhum contrato encontrado."
+          listMaxHeight={220}
+        />
         <div className="flex justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
           <button
             type="button"
             onClick={() => {
               setDateFrom('');
               setDateTo('');
+              setSelectedContracts([]);
+              setOpenFilterField(null);
             }}
             className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
           >
@@ -1371,10 +1417,10 @@ function AnalisesCombustivelContent() {
         {weeklyQuotaCard}
         <CadastroListEmpty
           icon={Fuel}
-          title={hasPeriodFilter ? 'Sem abastecimentos neste período' : 'Ainda sem abastecimentos concluídos'}
+          title={hasFilter ? 'Sem abastecimentos com esses filtros' : 'Ainda sem abastecimentos concluídos'}
           hint={
-            hasPeriodFilter
-              ? 'Tente ajustar o período selecionado.'
+            hasFilter
+              ? 'Tente ajustar os filtros.'
               : 'Quando houver relatórios com litros e preço por litro, os gráficos aparecem aqui.'
           }
         />
