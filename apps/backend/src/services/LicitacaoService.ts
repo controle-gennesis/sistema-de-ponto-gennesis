@@ -196,6 +196,8 @@ export type LicitacaoAnaliseClaude = {
   rejeicaoMotivo?: string | null;
   /** Conversa/projeto na Claude onde a análise foi feita. */
   linkClaude?: string | null;
+  /** Análise em texto livre. */
+  analise?: string | null;
 };
 
 function parseAnaliseClaude(raw: unknown): LicitacaoAnaliseClaude | null {
@@ -210,6 +212,7 @@ function parseAnaliseClaude(raw: unknown): LicitacaoAnaliseClaude | null {
     recomendacao: text(o.recomendacao),
     rejeicaoMotivo: text(o.rejeicaoMotivo),
     linkClaude: text(o.linkClaude),
+    analise: text(o.analise),
   };
 }
 
@@ -1288,35 +1291,44 @@ export class LicitacaoService {
     return serializeLicitacao(row);
   }
 
-  /** Grava a recomendação e/ou o link da Claude (só o que for informado). */
+  /** Grava os campos da Análise Claude (só o que for informado). */
   async salvarDadosAnaliseClaude(
     id: string,
-    dados: { recomendacao?: string | null; linkClaude?: string | null }
+    dados: {
+      recomendacao?: string | null;
+      linkClaude?: string | null;
+      analise?: string | null;
+      /** Mesmo campo "Pasta no Drive" usado nas fases seguintes. */
+      linkPastaDrive?: string | null;
+    }
   ) {
     const current = await licitacaoStoreGetById(id);
     if (!current) throw new Error('Licitação não encontrada');
     const anterior = parseAnaliseJson(current.analiseJson).analiseClaude;
+    const { linkPastaDrive, ...camposClaude } = dados;
     const row = await licitacaoStoreUpdate(id, {
       analiseJson: mergeAnaliseJson(current.analiseJson, {
-        analiseClaude: { ...anterior, ...dados },
+        analiseClaude: { ...anterior, ...camposClaude },
+        ...(linkPastaDrive !== undefined ? { linkPastaDrive } : {}),
       }),
     });
     return serializeLicitacao(row);
   }
 
-  /** Rejeitada na Análise Claude: vai para o Arquivo como declinada, com o motivo. */
-  async rejeitarAnaliseClaude(id: string, motivo: string) {
+  /** Arquivada direto da Análise Claude, com o status escolhido: o processo não segue adiante. */
+  async arquivarNaAnaliseClaude(id: string, status: LicitacaoArquivadaMotivo, motivo: string) {
     const current = await licitacaoStoreGetById(id);
     if (!current) throw new Error('Licitação não encontrada');
-    const texto = motivo.trim().slice(0, 2000);
-    if (!texto) throw new Error('Informe o motivo da rejeição.');
     const anterior = parseAnaliseJson(current.analiseJson).analiseClaude;
+    if (!anterior?.url || !anterior.linkClaude) {
+      throw new Error('Anexe o PDF e informe o link da análise da Claude antes de arquivar.');
+    }
     await licitacaoStoreUpdate(id, {
       analiseJson: mergeAnaliseJson(current.analiseJson, {
-        analiseClaude: { ...anterior, rejeicaoMotivo: texto },
+        analiseClaude: { ...anterior, rejeicaoMotivo: motivo.trim().slice(0, 2000) || null },
       }),
     });
-    return this.enviarParaArquivo(id, 'declinada');
+    return this.enviarParaArquivo(id, status);
   }
 
   async delete(id: string) {

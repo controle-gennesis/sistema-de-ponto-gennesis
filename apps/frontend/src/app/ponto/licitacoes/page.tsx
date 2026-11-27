@@ -1720,8 +1720,9 @@ export default function LicitacoesPage() {
       if (!selectedId || fase === faseAtual) return;
       // Salva automaticamente o que estiver pendente antes de mudar de fase.
       if (!(await salvarPendencias())) return;
-      if (fase === 'preliminar' || fase === 'em_analise') {
-        const nome = fase === 'preliminar' ? 'Análise Preliminar' : 'Em Análise';
+      if (fase === 'claude' || fase === 'preliminar' || fase === 'em_analise') {
+        const nome =
+          fase === 'claude' ? 'Análise Claude' : fase === 'preliminar' ? 'Análise Preliminar' : 'Em Análise';
         if (!window.confirm(`Enviar para ${nome}? O processo sairá da lista atual e ficará na aba ${nome}.`)) return;
         setAnaliseEtapaMutation.mutate({ id: selectedId, etapa: fase });
         return;
@@ -2684,6 +2685,7 @@ export default function LicitacoesPage() {
                             onChange={(e) => handleFaseSelect(e.target.value)}
                             className={`inline-flex h-9 appearance-none rounded-lg border bg-white py-1.5 pl-3 pr-8 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800 border-gray-300 dark:border-gray-600`}
                           >
+                            <option value="claude">Fase: Análise Claude</option>
                             <option value="preliminar">Fase: Análise Preliminar</option>
                             <option value="em_analise">Fase: Em Análise</option>
                             <option value="diretoria">Fase: Análise Diretoria</option>

@@ -165,7 +165,7 @@ router.post('/:id/analise-claude', (req: AuthRequest, res: Response, next: NextF
   });
 });
 router.patch('/:id/analise-claude', (req, res, next) => ctrl.salvarDadosAnaliseClaude(req, res, next));
-router.post('/:id/analise-claude/rejeitar', (req, res, next) => ctrl.rejeitarAnaliseClaude(req, res, next));
+router.post('/:id/analise-claude/rejeitar', (req, res, next) => ctrl.arquivarNaAnaliseClaude(req, res, next));
 
 router.post('/:id/documentos', (req: AuthRequest, res: Response, next: NextFunction) => {
   ctrl.uploadMiddleware(req, res, (err: unknown) => {

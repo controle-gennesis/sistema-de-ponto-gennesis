@@ -84,33 +84,36 @@ export default function KanbanBoardsScreen() {
 
   const openBoardMenu = (board: KanbanBoardSummary) => {
     const target = { id: board.id, name: board.department };
-    const options: Array<{ text: string; onPress?: () => void; style?: 'cancel' | 'destructive' }> = [
-      { text: 'Renomear', onPress: () => setRenameBoard(target) },
-    ];
-    if (board.canManageShares !== false) {
+    const options: Array<{ text: string; onPress?: () => void; style?: 'cancel' | 'destructive' }> = [];
+    if (board.isOwner) {
+      options.push({ text: 'Renomear', onPress: () => setRenameBoard(target) });
+    }
+    if (board.canManageShares) {
       options.push({ text: 'Compartilhar', onPress: () => setShareBoard(target) });
     }
-    options.push({
-      text: 'Excluir',
-      style: 'destructive',
-      onPress: () =>
-        Alert.alert('Excluir quadro', `Excluir "${board.department}" e todos os cards dele?`, [
-          { text: 'Cancelar', style: 'cancel' },
-          {
-            text: 'Excluir',
-            style: 'destructive',
-            onPress: async () => {
-              try {
-                await deleteKanbanBoard(board.id);
-                await queryClient.invalidateQueries({ queryKey: ['kanban-boards'] });
-                Toast.show({ type: 'success', text1: 'Quadro excluído' });
-              } catch (e: any) {
-                Toast.show({ type: 'error', text1: e?.message || 'Falha ao excluir' });
-              }
+    if (board.isOwner) {
+      options.push({
+        text: 'Excluir',
+        style: 'destructive',
+        onPress: () =>
+          Alert.alert('Excluir quadro', `Excluir "${board.department}" e todos os cards dele?`, [
+            { text: 'Cancelar', style: 'cancel' },
+            {
+              text: 'Excluir',
+              style: 'destructive',
+              onPress: async () => {
+                try {
+                  await deleteKanbanBoard(board.id);
+                  await queryClient.invalidateQueries({ queryKey: ['kanban-boards'] });
+                  Toast.show({ type: 'success', text1: 'Quadro excluído' });
+                } catch (e: any) {
+                  Toast.show({ type: 'error', text1: e?.message || 'Falha ao excluir' });
+                }
+              },
             },
-          },
-        ]),
-    });
+          ]),
+      });
+    }
     options.push({ text: 'Cancelar', style: 'cancel' });
     Alert.alert(board.department, undefined, options);
   };
@@ -206,7 +209,7 @@ export default function KanbanBoardsScreen() {
                     </Text>
                   ) : null}
                 </View>
-                {board.isCustom && board.isOwner ? (
+                {board.isCustom && (board.isOwner || board.canManageShares) ? (
                   <TouchableOpacity
                     onPress={() => openBoardMenu(board)}
                     hitSlop={10}

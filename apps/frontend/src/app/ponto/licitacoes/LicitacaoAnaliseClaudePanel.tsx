@@ -2,13 +2,23 @@
 
 import { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowRight, ChevronDown, ExternalLink, FileText, Loader2, Search, Upload, XCircle } from 'lucide-react';
+import { Archive, ArrowRight, ChevronDown, ExternalLink, FileText, Loader2, Search, Upload } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { clsx } from 'clsx';
 import api from '@/lib/api';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
+
+const RECOMENDACOES_CLAUDE = ['Participar', 'Avaliar com cuidado', 'Não participar'];
+
+const STATUS_ARQUIVO = [
+  { value: 'declinada', label: 'Declinada' },
+  { value: 'suspensa', label: 'Suspensa' },
+  { value: 'encerrada', label: 'Encerrada' },
+  { value: 'em_andamento', label: 'Em andamento' },
+  { value: 'vencidas', label: 'Vencida' },
+];
 
 export type AnaliseClaudeData = {
   nome?: string | null;
@@ -18,6 +28,7 @@ export type AnaliseClaudeData = {
   recomendacao?: string | null;
   rejeicaoMotivo?: string | null;
   linkClaude?: string | null;
+  analise?: string | null;
 };
 
 type Processo = {
@@ -33,6 +44,7 @@ type Processo = {
   analiseEtapa?: string | null;
   analiseJson?: {
     emArquivo?: boolean;
+    linkPastaDrive?: string | null;
     analiseClaude?: AnaliseClaudeData | null;
     origemRegiao?: { aceitePorNome?: string | null; rowSnapshot?: Record<string, unknown> | null } | null;
   } | null;
@@ -62,8 +74,10 @@ function apiMessage(err: unknown, fallback: string): string {
 export function LicitacaoAnaliseClaudePanel() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
-  const [rejeitando, setRejeitando] = useState<Processo | null>(null);
+  /** Processo com a janela "Arquivar" aberta. */
+  const [arquivando, setArquivando] = useState<Processo | null>(null);
   const [motivo, setMotivo] = useState('');
+  const [statusArquivo, setStatusArquivo] = useState('declinada');
   const fileRef = useRef<HTMLInputElement>(null);
   /** Processo aberto (link, recomendação e PDF); um por vez, para não baixar vários PDFs. */
   const [abertoId, setAbertoId] = useState<string | null>(null);
@@ -112,7 +126,16 @@ export function LicitacaoAnaliseClaudePanel() {
   });
 
   const dadosMutation = useMutation({
-    mutationFn: async ({ id, ...dados }: { id: string; recomendacao?: string | null; linkClaude?: string }) => {
+    mutationFn: async ({
+      id,
+      ...dados
+    }: {
+      id: string;
+      recomendacao?: string | null;
+      linkClaude?: string;
+      linkPastaDrive?: string;
+      analise?: string;
+    }) => {
       await api.patch(`/licitacoes/${id}/analise-claude`, dados);
     },
     onSuccess: () => void refresh(),
@@ -120,11 +143,16 @@ export function LicitacaoAnaliseClaudePanel() {
   });
 
   /** Salva o link ao sair do campo (como os links da Análise Preliminar). */
-  const salvarLink = (id: string, input: HTMLInputElement, atual: string) => {
+  const salvarLink = (
+    id: string,
+    input: HTMLInputElement,
+    atual: string,
+    campo: 'linkClaude' | 'linkPastaDrive' = 'linkClaude',
+  ) => {
     let link = input.value.trim();
     if (link && !/^https?:\/\//i.test(link)) link = `https://${link}`;
     input.value = link;
-    if (link !== atual) dadosMutation.mutate({ id, linkClaude: link });
+    if (link !== atual) dadosMutation.mutate({ id, [campo]: link });
   };
 
   const avancarMutation = useMutation({
@@ -138,17 +166,17 @@ export function LicitacaoAnaliseClaudePanel() {
     onError: (err) => toast.error(apiMessage(err, 'Não foi possível passar para a Análise Preliminar.')),
   });
 
-  const rejeitarMutation = useMutation({
-    mutationFn: async ({ id, texto }: { id: string; texto: string }) => {
-      await api.post(`/licitacoes/${id}/analise-claude/rejeitar`, { motivo: texto });
+  const arquivarMutation = useMutation({
+    mutationFn: async ({ id, texto, status }: { id: string; texto: string; status: string }) => {
+      await api.post(`/licitacoes/${id}/analise-claude/rejeitar`, { motivo: texto, status });
     },
     onSuccess: () => {
-      toast.success('Rejeitada e enviada para o Arquivo como declinada.');
-      setRejeitando(null);
+      toast.success('Enviada para o Arquivo.');
+      setArquivando(null);
       setMotivo('');
       void refresh();
     },
-    onError: (err) => toast.error(apiMessage(err, 'Não foi possível rejeitar.')),
+    onError: (err) => toast.error(apiMessage(err, 'Não foi possível arquivar.')),
   });
 
   const pickFile = (id: string) => {
@@ -217,16 +245,22 @@ export function LicitacaoAnaliseClaudePanel() {
           const analise = p.analiseJson?.analiseClaude;
           const pdfUrl = resolveApiMediaUrl(analise?.url ?? null);
           const link = analise?.linkClaude ?? '';
+          const linkDrive = p.analiseJson?.linkPastaDrive ?? '';
+          const textoAnalise = analise?.analise ?? '';
           const passou = p.abertura.time != null && p.abertura.time < today;
           const aberto = abertoId === p.id;
           const previaAberta = previas[p.id] ?? true;
-          const recomendacao = analise?.recomendacao ?? '';
-          const faltando = [!link && 'o link', !recomendacao.trim() && 'a recomendação', !pdfUrl && 'o PDF'].filter(
+          // Só vale uma das opções da lista.
+          const recomendacao = RECOMENDACOES_CLAUDE.includes(analise?.recomendacao ?? '')
+            ? (analise?.recomendacao ?? '')
+            : '';
+          const faltando = [!link && 'o link', !recomendacao && 'a recomendação', !pdfUrl && 'o PDF'].filter(
             (item): item is string => !!item,
           );
           const avisoFaltando = faltando.length
             ? `Falta ${faltando.join(', ').replace(/, ([^,]*)$/, ' e $1')} para passar para a Preliminar.`
             : '';
+          const faltaArquivar = [!link && 'o link', !pdfUrl && 'o PDF'].filter(Boolean).join(' e ');
           const enviando = uploadMutation.isPending && uploadMutation.variables?.id === p.id;
           const meta = [
             p.createdAt ? new Date(p.createdAt).toLocaleDateString('pt-BR') : null,
@@ -283,33 +317,6 @@ export function LicitacaoAnaliseClaudePanel() {
                       </p>
                     ) : null}
                   </div>
-
-                  <div className="flex shrink-0 flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      disabled={faltando.length > 0 || avancarMutation.isPending || dadosMutation.isPending}
-                      title={avisoFaltando || undefined}
-                      onClick={() => {
-                        if (window.confirm('Passar para a Análise Preliminar?')) avancarMutation.mutate(p.id);
-                      }}
-                      className="inline-flex h-10 items-center gap-1.5 whitespace-nowrap rounded-lg bg-red-600 px-4 text-sm font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      Passar para Preliminar <ArrowRight className="h-4 w-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMotivo('');
-                        setRejeitando(p);
-                      }}
-                      className="inline-flex h-10 items-center gap-1.5 rounded-lg border border-gray-300 px-3 text-sm font-medium text-gray-700 hover:text-red-600 dark:border-gray-600 dark:text-gray-200"
-                    >
-                      <XCircle className="h-4 w-4" /> Rejeitar
-                    </button>
-                    {avisoFaltando ? (
-                      <p className="w-full text-xs text-amber-600 dark:text-amber-400">{avisoFaltando}</p>
-                    ) : null}
-                  </div>
                 </CardContent>
               </Card>
 
@@ -350,19 +357,20 @@ export function LicitacaoAnaliseClaudePanel() {
                     <p className="mt-1 text-xs text-gray-500">Segue para as próximas fases.</p>
 
                     <p className="mt-4 text-xs font-medium uppercase tracking-wide text-gray-500">Recomendação</p>
-                    <textarea
-                      key={recomendacao}
-                      defaultValue={recomendacao}
-                      rows={4}
-                      maxLength={4000}
+                    <select
+                      value={recomendacao}
+                      disabled={dadosMutation.isPending}
                       aria-label="Recomendação da análise"
-                      placeholder="Digite a recomendação..."
-                      onBlur={(e) => {
-                        const texto = e.currentTarget.value.trim();
-                        if (texto !== recomendacao) dadosMutation.mutate({ id: p.id, recomendacao: texto });
-                      }}
-                      className="mt-1 w-full resize-y rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-                    />
+                      onChange={(e) => dadosMutation.mutate({ id: p.id, recomendacao: e.target.value })}
+                      className="mt-1 h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                    >
+                      <option value="">Selecione a recomendação</option>
+                      {RECOMENDACOES_CLAUDE.map((opcao) => (
+                        <option key={opcao} value={opcao}>
+                          {opcao}
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
                   <div>
@@ -394,7 +402,84 @@ export function LicitacaoAnaliseClaudePanel() {
                         ? `Enviado por ${analise.enviadoPorNome}.`
                         : 'Somente PDF, até 15 MB.'}
                     </p>
+
+                    <p className="mt-4 text-xs font-medium uppercase tracking-wide text-gray-500">
+                      Link da pasta no Drive
+                    </p>
+                    <input
+                      key={linkDrive}
+                      type="url"
+                      defaultValue={linkDrive}
+                      placeholder="https://drive.google.com/..."
+                      aria-label="Link da pasta no Drive"
+                      onBlur={(e) => salvarLink(p.id, e.currentTarget, linkDrive, 'linkPastaDrive')}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') e.currentTarget.blur();
+                      }}
+                      className="mt-1 h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                    />
+                    <p className="mt-1 text-xs text-gray-500">Segue para as próximas fases.</p>
                   </div>
+
+                  <div className="lg:col-span-2">
+                    <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Análise</p>
+                    <textarea
+                      key={textoAnalise}
+                      defaultValue={textoAnalise}
+                      rows={7}
+                      maxLength={20000}
+                      aria-label="Análise"
+                      placeholder="Escreva a análise..."
+                      onBlur={(e) => {
+                        const texto = e.currentTarget.value.trim();
+                        if (texto !== textoAnalise) dadosMutation.mutate({ id: p.id, analise: texto });
+                      }}
+                      className="mt-1 w-full resize-y rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm leading-relaxed text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card padding="none" className="shadow-sm">
+                <CardContent className="space-y-2 px-5 py-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={faltando.length > 0 || avancarMutation.isPending || dadosMutation.isPending}
+                      title={avisoFaltando || undefined}
+                      onClick={() => {
+                        if (window.confirm('Passar para a Análise Preliminar?')) {
+                          avancarMutation.mutate(p.id);
+                        }
+                      }}
+                      className="inline-flex h-10 items-center gap-1.5 whitespace-nowrap rounded-lg bg-red-600 px-4 text-sm font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      Passar para Preliminar <ArrowRight className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!!faltaArquivar || dadosMutation.isPending}
+                      title={
+                        faltaArquivar
+                          ? `Falta ${faltaArquivar} para arquivar`
+                          : 'Vai para a aba Arquivo e não segue no processo'
+                      }
+                      onClick={() => {
+                        setMotivo('');
+                        setStatusArquivo(passou ? 'vencidas' : 'declinada');
+                        setArquivando(p);
+                      }}
+                      className="inline-flex h-10 items-center gap-1.5 whitespace-nowrap rounded-lg border border-gray-300 px-4 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
+                    >
+                      <Archive className="h-4 w-4" /> Arquivar
+                    </button>
+                  </div>
+                  {avisoFaltando ? (
+                    <p className="text-xs text-amber-600 dark:text-amber-400">
+                      {avisoFaltando}
+                      {faltaArquivar ? ` Para arquivar, falta ${faltaArquivar}.` : ''}
+                    </p>
+                  ) : null}
                 </CardContent>
               </Card>
 
@@ -427,36 +512,51 @@ export function LicitacaoAnaliseClaudePanel() {
         })
       )}
 
-      {rejeitando ? (
-        <Modal isOpen onClose={() => setRejeitando(null)} title="Rejeitar licitação" size="sm" confirmBeforeClose={false}>
+      {arquivando ? (
+        <Modal isOpen onClose={() => setArquivando(null)} title="Arquivar licitação" size="sm" confirmBeforeClose={false}>
           <p className="text-sm text-gray-600 dark:text-gray-300">
-            {rejeitando.orgao || rejeitando.titulo} vai para o Arquivo como declinada.
+            {arquivando.orgao || arquivando.titulo} vai para a aba Arquivo e não segue no processo.
           </p>
           <label className="mt-3 block text-sm font-medium text-gray-700 dark:text-gray-200">
-            Motivo
+            Status
+            <select
+              value={statusArquivo}
+              onChange={(e) => setStatusArquivo(e.target.value)}
+              className="mt-1 h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm font-normal text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+            >
+              {STATUS_ARQUIVO.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="mt-3 block text-sm font-medium text-gray-700 dark:text-gray-200">
+            Motivo (opcional)
             <textarea
               value={motivo}
               onChange={(e) => setMotivo(e.target.value)}
-              rows={4}
-              autoFocus
+              rows={3}
               className="mt-1 w-full resize-y rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-normal text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
             />
           </label>
           <div className="mt-4 flex justify-end gap-2">
             <button
               type="button"
-              onClick={() => setRejeitando(null)}
+              onClick={() => setArquivando(null)}
               className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 dark:border-gray-600 dark:text-gray-200"
             >
               Cancelar
             </button>
             <button
               type="button"
-              disabled={!motivo.trim() || rejeitarMutation.isPending}
-              onClick={() => rejeitarMutation.mutate({ id: rejeitando.id, texto: motivo.trim() })}
+              disabled={arquivarMutation.isPending}
+              onClick={() =>
+                arquivarMutation.mutate({ id: arquivando.id, texto: motivo.trim(), status: statusArquivo })
+              }
               className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
             >
-              Rejeitar
+              Arquivar
             </button>
           </div>
         </Modal>

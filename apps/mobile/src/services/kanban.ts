@@ -365,12 +365,27 @@ export type KanbanBoardShare = {
   id: string;
   userId: string;
   permission: 'READ' | 'WRITE';
+  /** Gerente do quadro: pode convidar e remover pessoas. */
+  canManage?: boolean;
   user: { id: string; name: string; email: string; profilePhotoUrl: string | null };
 };
 
-export async function fetchKanbanBoardShares(boardId: string): Promise<KanbanBoardShare[]> {
+export type KanbanBoardShareList = {
+  shares: KanbanBoardShare[];
+  owner: KanbanBoardShare['user'] | null;
+  /** Dono ou administrador: escolhe os gerentes. */
+  canGrantManager: boolean;
+};
+
+export async function fetchKanbanBoardShares(boardId: string): Promise<KanbanBoardShareList> {
   const res = await api.get(`/api/kanban/boards/${boardId}/shares`);
-  return (await readApiData<KanbanBoardShare[]>(res)) || [];
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json?.message || 'Falha ao carregar o compartilhamento');
+  return {
+    shares: json.data ?? [],
+    owner: json.owner ?? null,
+    canGrantManager: json.canGrantManager === true,
+  };
 }
 
 export async function addKanbanBoardShare(
@@ -385,9 +400,9 @@ export async function addKanbanBoardShare(
 export async function updateKanbanBoardShare(
   boardId: string,
   userId: string,
-  permission: 'READ' | 'WRITE',
+  changes: { permission?: 'READ' | 'WRITE'; canManage?: boolean },
 ): Promise<KanbanBoardShare> {
-  const res = await api.patch(`/api/kanban/boards/${boardId}/shares/${userId}`, { permission });
+  const res = await api.patch(`/api/kanban/boards/${boardId}/shares/${userId}`, changes);
   return readApiData<KanbanBoardShare>(res);
 }
 

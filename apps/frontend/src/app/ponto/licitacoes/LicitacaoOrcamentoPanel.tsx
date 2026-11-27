@@ -488,14 +488,20 @@ export function LicitacaoOrcamentoPanel() {
     enviarArquivoMutation.mutate({ id: selectedId, motivo: arquivarStatus });
   };
 
-  /** Fase: Análise Preliminar / Em Análise voltam o processo; Análise Diretoria envia para lá. */
+  /** Fase: Análise Claude / Preliminar / Em Análise voltam o processo; Análise Diretoria envia para lá. */
   const faseMutation = useMutation({
-    mutationFn: async ({ id, etapa }: { id: string; etapa: 'preliminar' | 'em_analise' }) => {
+    mutationFn: async ({ id, etapa }: { id: string; etapa: 'claude' | 'preliminar' | 'em_analise' }) => {
       const res = await api.patch(`/licitacoes/${id}/analise-etapa`, { etapa });
       return { data: res.data?.data, etapa };
     },
     onSuccess: ({ etapa }) => {
-      toast.success(etapa === 'preliminar' ? 'Enviada para a Análise Preliminar.' : 'Enviada para Em Análise.');
+      toast.success(
+        etapa === 'claude'
+          ? 'Enviada para a Análise Claude.'
+          : etapa === 'preliminar'
+            ? 'Enviada para a Análise Preliminar.'
+            : 'Enviada para Em Análise.'
+      );
       setSelectedId(null);
       void queryClient.invalidateQueries({ queryKey: ['licitacoes'] });
       void refetchList();
@@ -506,8 +512,9 @@ export function LicitacaoOrcamentoPanel() {
   });
   const handleFase = (fase: string) => {
     if (!selectedId || fase === 'orcamento') return;
-    if (fase === 'preliminar' || fase === 'em_analise') {
-      const nome = fase === 'preliminar' ? 'Análise Preliminar' : 'Em Análise';
+    if (fase === 'claude' || fase === 'preliminar' || fase === 'em_analise') {
+      const nome =
+        fase === 'claude' ? 'Análise Claude' : fase === 'preliminar' ? 'Análise Preliminar' : 'Em Análise';
       if (!window.confirm(`Enviar para ${nome}? A licitação sairá da aba Orçamento.`)) return;
       faseMutation.mutate({ id: selectedId, etapa: fase });
       return;
@@ -942,6 +949,7 @@ export function LicitacaoOrcamentoPanel() {
                     onChange={(e) => handleFase(e.target.value)}
                     className="inline-flex h-10 appearance-none rounded-lg border border-gray-300 bg-white py-1.5 pl-3 pr-8 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800"
                   >
+                    <option value="claude">Fase: Análise Claude</option>
                     <option value="preliminar">Fase: Análise Preliminar</option>
                     <option value="em_analise">Fase: Em Análise</option>
                     <option value="diretoria">Fase: Análise Diretoria</option>

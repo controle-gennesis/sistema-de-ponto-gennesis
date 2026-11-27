@@ -3717,6 +3717,8 @@ model KanbanBoardShare {
   boardId    String                     @map("board_id")
   userId     String                     @map("user_id")
   permission KanbanBoardSharePermission @default(WRITE)
+  /// "Gerente" do quadro: pode convidar e remover pessoas.
+  canManage  Boolean                    @default(false) @map("can_manage")
   createdAt  DateTime                   @default(now())
   updatedAt  DateTime                   @updatedAt
   createdBy  String?                    @map("created_by")

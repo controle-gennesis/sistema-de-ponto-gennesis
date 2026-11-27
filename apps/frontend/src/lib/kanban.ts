@@ -117,6 +117,8 @@ export interface KanbanBoardShare {
   id: string;
   userId: string;
   permission: 'READ' | 'WRITE';
+  /** Gerente do quadro: pode convidar e remover pessoas. */
+  canManage?: boolean;
   user: {
     id: string;
     name: string;
@@ -181,9 +183,21 @@ export async function deleteKanbanBoard(boardId: string): Promise<{ departmentKe
   return res.data.data;
 }
 
-export async function fetchKanbanBoardShares(boardId: string): Promise<KanbanBoardShare[]> {
+export interface KanbanBoardShareList {
+  shares: KanbanBoardShare[];
+  /** Quem criou o quadro. */
+  owner: KanbanBoardShare['user'] | null;
+  /** Dono ou administrador: escolhe os gerentes. */
+  canGrantManager: boolean;
+}
+
+export async function fetchKanbanBoardShares(boardId: string): Promise<KanbanBoardShareList> {
   const res = await api.get(`/kanban/boards/${boardId}/shares`);
-  return res.data.data;
+  return {
+    shares: res.data.data,
+    owner: res.data.owner ?? null,
+    canGrantManager: res.data.canGrantManager === true,
+  };
 }
 
 export async function addKanbanBoardShare(
@@ -198,9 +212,9 @@ export async function addKanbanBoardShare(
 export async function updateKanbanBoardShare(
   boardId: string,
   userId: string,
-  permission: 'READ' | 'WRITE',
+  changes: { permission?: 'READ' | 'WRITE'; canManage?: boolean },
 ): Promise<KanbanBoardShare> {
-  const res = await api.patch(`/kanban/boards/${boardId}/shares/${userId}`, { permission });
+  const res = await api.patch(`/kanban/boards/${boardId}/shares/${userId}`, changes);
   return res.data.data;
 }
 

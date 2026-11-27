@@ -2536,6 +2536,8 @@ function KanbanBoardRowActions({
   onClosePicker: () => void;
 }) {
   const canManage = Boolean(board.isCustom && board.isOwner && board.id);
+  // Dono, administrador ou gerente do quadro.
+  const canShare = Boolean(board.isCustom && board.id && board.canManageShares);
   const canDelete = Boolean(
     board.isCustom && board.id && (board.isOwner || isAdministrator),
   );
@@ -2566,12 +2568,12 @@ function KanbanBoardRowActions({
 
   const openMenu = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!canManage && !canDelete && !canDuplicate) return;
+    if (!canManage && !canShare && !canDelete && !canDuplicate) return;
     const rect = btnRef.current?.getBoundingClientRect();
     if (!rect) return;
 
     const menuWidth = 176;
-    const menuHeight = (canManage ? 140 : 56) + (canDuplicate ? 38 : 0);
+    const menuHeight = 18 + 38 * [canShare, canManage, canDelete, canDuplicate].filter(Boolean).length;
     const spaceBelow = window.innerHeight - rect.bottom;
     const openUp = spaceBelow < menuHeight + 8 && rect.top > menuHeight + 8;
 
@@ -2585,7 +2587,7 @@ function KanbanBoardRowActions({
     setMenuOpen((v) => !v);
   };
 
-  if (!canManage && !canDelete && !canDuplicate) {
+  if (!canManage && !canShare && !canDelete && !canDuplicate) {
     return <span className="inline-block h-8 w-8 shrink-0" aria-hidden />;
   }
 
@@ -2620,23 +2622,25 @@ function KanbanBoardRowActions({
                   <Copy className="h-4 w-4 shrink-0" />
                   Duplicar quadro
                 </button>
-                {canManage || canDelete ? <hr className="my-1 border-gray-200 dark:border-gray-700" /> : null}
+                {canShare || canManage || canDelete ? <hr className="my-1 border-gray-200 dark:border-gray-700" /> : null}
               </>
+            ) : null}
+            {canShare ? (
+              <button
+                type="button"
+                role="menuitem"
+                onMouseDown={runMenuAction(() => {
+                  onShare(board);
+                  onClosePicker();
+                })}
+                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
+              >
+                <Users className="h-4 w-4 shrink-0" />
+                Compartilhar
+              </button>
             ) : null}
             {canManage ? (
               <>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onMouseDown={runMenuAction(() => {
-                    onShare(board);
-                    onClosePicker();
-                  })}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
-                >
-                  <Users className="h-4 w-4 shrink-0" />
-                  Compartilhar
-                </button>
                 <button
                   type="button"
                   role="menuitem"
@@ -2766,7 +2770,7 @@ function KanbanBoardPicker({
       </button>
       {open && (
         <div className="absolute left-0 top-full z-50 mt-1 min-w-[16rem] w-max max-w-[min(22rem,calc(100vw-2rem))] rounded-xl border border-gray-200 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800">
-          <div className="max-h-72 overflow-y-auto overscroll-contain p-1.5">
+          <div className="max-h-72 overflow-y-auto overflow-x-hidden overscroll-contain p-1.5">
             {boards.length === 0 ? (
               <p className="px-3 py-2.5 text-sm text-gray-500 dark:text-gray-400">
                 Nenhum quadro disponível.
@@ -2795,13 +2799,16 @@ function KanbanBoardPicker({
                         if (!active) onSelect(b.departmentKey);
                       }}
                       className={clsx(
-                        'flex-1 whitespace-nowrap py-2 pr-2 text-left text-sm',
+                        'min-w-0 flex-1 py-2 pr-2 text-left text-sm',
                         active && 'font-medium',
                       )}
                     >
-                      {b.department}
+                      {/* Nome grande quebra em até duas linhas; o resto aparece ao passar o mouse. */}
+                      <span className="line-clamp-2 break-words" title={b.department}>
+                        {b.department}
+                      </span>
                       {b.createdByName ? (
-                        <span className="block text-xs font-normal text-gray-400 dark:text-gray-500">
+                        <span className="block truncate text-xs font-normal text-gray-400 dark:text-gray-500">
                           Criado por {b.createdByName}
                           {b.createdAt ? ` em ${new Date(b.createdAt).toLocaleDateString('pt-BR')}` : ''}
                         </span>
@@ -5829,16 +5836,6 @@ function KanbanPage() {
           boardId={shareTarget.boardId}
           boardName={shareTarget.boardName}
           currentUserId={meUser?.id}
-          ownerUser={
-            meUser
-              ? {
-                  id: meUser.id,
-                  name: meUser.name,
-                  email: meUser.email ?? '',
-                  profilePhotoUrl: meUser.profilePhotoUrl ?? null,
-                }
-              : null
-          }
         />
       )}
     </MainLayout>

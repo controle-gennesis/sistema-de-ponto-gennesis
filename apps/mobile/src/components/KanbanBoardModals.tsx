@@ -642,7 +642,9 @@ export function BoardShareModal({
       queryClient.invalidateQueries({ queryKey: ['kanban-boards'] }),
     ]);
 
-  const shares = sharesQuery.data ?? [];
+  const shares = sharesQuery.data?.shares ?? [];
+  const owner = sharesQuery.data?.owner ?? null;
+  const canGrantManager = sharesQuery.data?.canGrantManager ?? false;
 
   const add = async (u: { id: string }) => {
     if (!board) return;
@@ -658,10 +660,20 @@ export function BoardShareModal({
   const togglePermission = async (userId: string, current: 'READ' | 'WRITE') => {
     if (!board) return;
     try {
-      await updateKanbanBoardShare(board.id, userId, current === 'WRITE' ? 'READ' : 'WRITE');
+      await updateKanbanBoardShare(board.id, userId, { permission: current === 'WRITE' ? 'READ' : 'WRITE' });
       await refresh();
     } catch (e: any) {
       Toast.show({ type: 'error', text1: e?.message || 'Falha ao alterar permissão' });
+    }
+  };
+
+  const toggleManager = async (userId: string, current: boolean) => {
+    if (!board) return;
+    try {
+      await updateKanbanBoardShare(board.id, userId, { canManage: !current });
+      await refresh();
+    } catch (e: any) {
+      Toast.show({ type: 'error', text1: e?.message || 'Falha ao alterar o gerente' });
     }
   };
 
@@ -695,10 +707,21 @@ export function BoardShareModal({
       >
         {sharesQuery.isLoading ? (
           <ActivityIndicator color={colors.primary} style={{ marginVertical: 24 }} />
-        ) : shares.length === 0 ? (
+        ) : shares.length === 0 && !owner ? (
           <Text style={styles.empty}>Ninguém tem acesso ainda</Text>
         ) : (
           <ScrollView style={{ maxHeight: 360 }} showsVerticalScrollIndicator={false}>
+            {owner ? (
+              <View style={styles.listRow}>
+                <MemberAvatar name={owner.name} photoUrl={owner.profilePhotoUrl} size={34} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.rowTitle} numberOfLines={1}>
+                    {owner.name}
+                  </Text>
+                  <Text style={styles.rowMeta}>Criador do quadro</Text>
+                </View>
+              </View>
+            ) : null}
             {shares.map((sh) => (
               <View key={sh.id} style={styles.listRow}>
                 <MemberAvatar name={sh.user.name} photoUrl={sh.user.profilePhotoUrl} size={34} />
@@ -709,18 +732,31 @@ export function BoardShareModal({
                   <Text style={styles.rowMeta} numberOfLines={1}>
                     {sh.user.email}
                   </Text>
+                  {canGrantManager ? (
+                    <TouchableOpacity onPress={() => void toggleManager(sh.userId, sh.canManage === true)} hitSlop={6}>
+                      <Text style={[styles.restoreText, { marginTop: 4, color: sh.canManage ? colors.primary : colors.textSecondary }]}>
+                        {sh.canManage ? '✓ Gerente' : 'Tornar gerente'}
+                      </Text>
+                    </TouchableOpacity>
+                  ) : sh.canManage ? (
+                    <Text style={styles.rowMeta}>Gerente</Text>
+                  ) : null}
                 </View>
-                <TouchableOpacity
-                  onPress={() => void togglePermission(sh.userId, sh.permission)}
-                  hitSlop={6}
-                >
-                  <Text style={[styles.restoreText, { color: colors.primary }]}>
-                    {sh.permission === 'WRITE' ? 'Pode editar' : 'Só ver'}
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => remove(sh.userId, sh.user.name)} hitSlop={8}>
-                  <Trash2 size={15} color={colors.textSecondary} />
-                </TouchableOpacity>
+                {canGrantManager || !sh.canManage ? (
+                  <>
+                    <TouchableOpacity
+                      onPress={() => void togglePermission(sh.userId, sh.permission)}
+                      hitSlop={6}
+                    >
+                      <Text style={[styles.restoreText, { color: colors.primary }]}>
+                        {sh.permission === 'WRITE' ? 'Pode editar' : 'Só ver'}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => remove(sh.userId, sh.user.name)} hitSlop={8}>
+                      <Trash2 size={15} color={colors.textSecondary} />
+                    </TouchableOpacity>
+                  </>
+                ) : null}
               </View>
             ))}
           </ScrollView>
@@ -733,7 +769,7 @@ export function BoardShareModal({
         visible={pickerOpen}
         onClose={() => setPickerOpen(false)}
         onSelect={add}
-        excludeUserIds={shares.map((x) => x.userId)}
+        excludeUserIds={[...shares.map((x) => x.userId), ...(owner ? [owner.id] : [])]}
         title="Compartilhar com"
       />
     </>

@@ -1135,6 +1135,7 @@ export class KanbanService {
     const archivedWhere = archived ? { archivedAt: { not: null } } : { archivedAt: null };
 
     const boardSelect = {
+      shares: { where: { userId }, select: { canManage: true } },
       id: true,
       name: true,
       slug: true,
@@ -1180,6 +1181,7 @@ export class KanbanService {
       createdAt?: Date;
       updatedAt: Date;
       _count: { columns: number };
+      shares?: Array<{ canManage: boolean }>;
     }) => {
       if (seen.has(b.id)) return;
       seen.add(b.id);
@@ -1194,7 +1196,8 @@ export class KanbanService {
         isOwnDepartment: !b.isCustom && b.departmentKey === ownKey,
         isCustom: b.isCustom,
         isOwner: b.isCustom && b.createdById === userId,
-        canManageShares: b.isCustom && b.createdById === userId,
+        canManageShares:
+          b.isCustom && (b.createdById === userId || isAdmin || b.shares?.[0]?.canManage === true),
         sharedWithMe: b.isCustom && b.createdById !== userId,
         createdByName: b.isCustom ? (b.creator?.name ?? null) : null,
         createdAt: b.createdAt?.toISOString(),
@@ -1564,13 +1567,34 @@ export class KanbanService {
     return { departmentKey: board.departmentKey };
   }
 
-  async listBoardShares(boardId: string, requesterId: string) {
+  /**
+   * Quem mexe nos acessos de um quadro criado manualmente: o dono e o administrador (que também
+   * escolhem os gerentes) ou um convidado marcado como gerente.
+   */
+  private async assertShareManagement(boardId: string, requesterId: string) {
     const board = await prisma.kanbanBoard.findUnique({
       where: { id: boardId },
-      select: { ...this.boardAccessSelect, isCustom: true },
+      select: {
+        id: true,
+        isCustom: true,
+        createdById: true,
+        creator: { select: { id: true, name: true, email: true, profilePhotoUrl: true } },
+      },
     });
     if (!board || !board.isCustom) throw new Error('Quadro não encontrado');
-    if (board.createdById !== requesterId) throw new Error(KANBAN_FORBIDDEN);
+    const canGrantManager = board.createdById === requesterId || (await userIsAdministrator(requesterId));
+    if (!canGrantManager) {
+      const share = await prisma.kanbanBoardShare.findUnique({
+        where: { boardId_userId: { boardId, userId: requesterId } },
+        select: { canManage: true },
+      });
+      if (!share?.canManage) throw new Error(KANBAN_FORBIDDEN);
+    }
+    return { board, canGrantManager };
+  }
+
+  async listBoardShares(boardId: string, requesterId: string) {
+    const { board, canGrantManager } = await this.assertShareManagement(boardId, requesterId);
 
     const shares = await prisma.kanbanBoardShare.findMany({
       where: { boardId },
@@ -1588,19 +1612,24 @@ export class KanbanService {
       orderBy: { createdAt: 'asc' },
     });
 
-    return shares
-      .filter((s) => !isKanbanHiddenPickerUser(s.user))
-      .map((s) => ({
-        id: s.id,
-        userId: s.userId,
-        permission: s.permission,
-        user: {
-          id: s.user.id,
-          name: s.user.name,
-          email: s.user.email,
-          profilePhotoUrl: s.user.profilePhotoUrl,
-        },
-      }));
+    return {
+      owner: board.creator,
+      canGrantManager,
+      shares: shares
+        .filter((s) => !isKanbanHiddenPickerUser(s.user))
+        .map((s) => ({
+          id: s.id,
+          userId: s.userId,
+          permission: s.permission,
+          canManage: s.canManage,
+          user: {
+            id: s.user.id,
+            name: s.user.name,
+            email: s.user.email,
+            profilePhotoUrl: s.user.profilePhotoUrl,
+          },
+        })),
+    };
   }
 
   async addBoardShare(
@@ -1613,12 +1642,10 @@ export class KanbanService {
       throw new Error('Não é possível compartilhar consigo mesmo');
     }
 
-    const board = await prisma.kanbanBoard.findUnique({
-      where: { id: boardId },
-      select: { ...this.boardAccessSelect, isCustom: true },
-    });
-    if (!board || !board.isCustom) throw new Error('Quadro não encontrado');
-    if (board.createdById !== requesterId) throw new Error(KANBAN_FORBIDDEN);
+    const { board } = await this.assertShareManagement(boardId, requesterId);
+    if (targetUserId === board.createdById) {
+      throw new Error('Essa pessoa já é a criadora do quadro');
+    }
 
     const target = await prisma.user.findFirst({
       where: { id: targetUserId, isActive: true },
@@ -1660,24 +1687,41 @@ export class KanbanService {
   async updateBoardShare(
     boardId: string,
     targetUserId: string,
-    permission: 'READ' | 'WRITE',
+    changes: { permission?: 'READ' | 'WRITE'; canManage?: boolean },
     requesterId: string,
   ) {
-    const board = await prisma.kanbanBoard.findUnique({
-      where: { id: boardId },
-      select: { ...this.boardAccessSelect, isCustom: true },
+    const { canGrantManager } = await this.assertShareManagement(boardId, requesterId);
+    const current = await prisma.kanbanBoardShare.findUnique({
+      where: { boardId_userId: { boardId, userId: targetUserId } },
+      select: { canManage: true },
     });
-    if (!board || !board.isCustom) throw new Error('Quadro não encontrado');
-    if (board.createdById !== requesterId) throw new Error(KANBAN_FORBIDDEN);
-
-    const perm =
-      permission === 'WRITE'
-        ? KanbanBoardSharePermission.WRITE
-        : KanbanBoardSharePermission.READ;
+    if (!current) throw new Error('Quadro não encontrado');
+    // Gerente não promove ninguém nem mexe em outro gerente.
+    if (!canGrantManager && (changes.canManage !== undefined || current.canManage)) {
+      throw new Error(KANBAN_FORBIDDEN);
+    }
 
     const share = await prisma.kanbanBoardShare.update({
       where: { boardId_userId: { boardId, userId: targetUserId } },
-      data: { permission: perm },
+      data: {
+        ...(changes.permission
+          ? {
+              permission:
+                changes.permission === 'WRITE'
+                  ? KanbanBoardSharePermission.WRITE
+                  : KanbanBoardSharePermission.READ,
+            }
+          : {}),
+        // Gerente precisa poder editar; quem passa a só ver deixa de ser gerente.
+        ...(changes.canManage !== undefined
+          ? {
+              canManage: changes.canManage,
+              ...(changes.canManage ? { permission: KanbanBoardSharePermission.WRITE } : {}),
+            }
+          : changes.permission === 'READ'
+            ? { canManage: false }
+            : {}),
+      },
       include: {
         user: { select: { id: true, name: true, email: true, profilePhotoUrl: true } },
       },
@@ -1687,17 +1731,20 @@ export class KanbanService {
       id: share.id,
       userId: share.userId,
       permission: share.permission,
+      canManage: share.canManage,
       user: share.user,
     };
   }
 
   async removeBoardShare(boardId: string, targetUserId: string, requesterId: string) {
-    const board = await prisma.kanbanBoard.findUnique({
-      where: { id: boardId },
-      select: { ...this.boardAccessSelect, isCustom: true },
-    });
-    if (!board || !board.isCustom) throw new Error('Quadro não encontrado');
-    if (board.createdById !== requesterId) throw new Error(KANBAN_FORBIDDEN);
+    const { canGrantManager } = await this.assertShareManagement(boardId, requesterId);
+    if (!canGrantManager && targetUserId !== requesterId) {
+      const target = await prisma.kanbanBoardShare.findUnique({
+        where: { boardId_userId: { boardId, userId: targetUserId } },
+        select: { canManage: true },
+      });
+      if (target?.canManage) throw new Error(KANBAN_FORBIDDEN);
+    }
 
     await prisma.kanbanBoardShare.delete({
       where: { boardId_userId: { boardId, userId: targetUserId } },
@@ -1753,7 +1800,11 @@ export class KanbanService {
     const formattedBoard = formatBoardResponse(board, {
       canWrite: access.canWrite,
       isOwner: access.isOwner,
-      canManageShares: board.isCustom && access.isOwner,
+      canManageShares:
+        board.isCustom &&
+        (access.isOwner ||
+          (await userIsAdministrator(userId)) ||
+          (await prisma.kanbanBoardShare.count({ where: { boardId: board.id, userId, canManage: true } })) > 0),
     });
     const counts = await this.countMaterialsByCard(
       formattedBoard.columns.flatMap((c) => c.cards.map((card) => card.id)),

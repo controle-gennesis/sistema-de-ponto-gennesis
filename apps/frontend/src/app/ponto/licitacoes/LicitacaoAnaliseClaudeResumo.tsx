@@ -11,7 +11,8 @@ export function LicitacaoAnaliseClaudeResumo({ analise }: { analise?: AnaliseCla
   const url = resolveApiMediaUrl(data?.url ?? null);
   const link = /^https?:\/\//i.test(data?.linkClaude ?? '') ? data!.linkClaude! : '';
   const recomendacao = data?.recomendacao?.trim() ?? '';
-  if (!url && !link && !recomendacao && !data?.rejeicaoMotivo) return null;
+  const analiseTexto = data?.analise?.trim() ?? '';
+  if (!url && !link && !recomendacao && !analiseTexto && !data?.rejeicaoMotivo) return null;
 
   return (
     <Card padding="none" className="shadow-sm">
@@ -41,9 +42,14 @@ export function LicitacaoAnaliseClaudeResumo({ analise }: { analise?: AnaliseCla
         {recomendacao ? (
           <p className="mt-1 whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-200">Recomendação: {recomendacao}</p>
         ) : null}
+        {analiseTexto ? (
+          <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-gray-800 dark:text-gray-200">
+            {analiseTexto}
+          </p>
+        ) : null}
         {data?.rejeicaoMotivo ? (
           <p className="mt-1 whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-200">
-            Motivo da rejeição: {data.rejeicaoMotivo}
+            Motivo do arquivamento: {data.rejeicaoMotivo}
           </p>
         ) : null}
       </CardContent>

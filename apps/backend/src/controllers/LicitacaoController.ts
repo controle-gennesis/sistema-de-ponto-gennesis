@@ -1070,6 +1070,12 @@ export class LicitacaoController {
         if (link && !/^https?:\/\/\S+$/i.test(link)) throw createError('Informe um link válido', 400);
         dados.linkClaude = link.slice(0, 2000) || null;
       }
+      if (body.analise !== undefined) {
+        dados.analise = String(body.analise ?? '').trim().slice(0, 20000) || null;
+      }
+      if (body.linkPastaDrive !== undefined) {
+        dados.linkPastaDrive = String(body.linkPastaDrive ?? '').trim().slice(0, 2000) || null;
+      }
       const data = await licitacaoService.salvarDadosAnaliseClaude(req.params.id, dados);
       res.json({ success: true, data });
     } catch (error) {
@@ -1077,10 +1083,12 @@ export class LicitacaoController {
     }
   }
 
-  async rejeitarAnaliseClaude(req: AuthRequest, res: Response, next: NextFunction) {
+  async arquivarNaAnaliseClaude(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const motivo = typeof req.body?.motivo === 'string' ? req.body.motivo : '';
-      const data = await licitacaoService.rejeitarAnaliseClaude(req.params.id, motivo);
+      const status = req.body?.status || 'declinada';
+      if (!isLicitacaoArquivadaMotivo(status)) throw createError('Status inválido', 400);
+      const data = await licitacaoService.arquivarNaAnaliseClaude(req.params.id, status, motivo);
       res.json({ success: true, data });
     } catch (error) {
       next(error instanceof Error ? createError(error.message, 400) : error);

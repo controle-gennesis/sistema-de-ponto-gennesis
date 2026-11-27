@@ -220,8 +220,8 @@ export class KanbanController {
       const userId = requireUserId(req, next);
       if (!userId) return;
       const { boardId } = req.params;
-      const shares = await kanbanService.listBoardShares(boardId, userId);
-      res.json({ success: true, data: shares });
+      const { shares, owner, canGrantManager } = await kanbanService.listBoardShares(boardId, userId);
+      res.json({ success: true, data: shares, owner, canGrantManager });
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : '';
       if (msg === 'Quadro não encontrado') return next(createError(msg, 404));
@@ -254,9 +254,16 @@ export class KanbanController {
       const userId = requireUserId(req, next);
       if (!userId) return;
       const { boardId, userId: targetUserId } = req.params;
-      const { permission = 'READ' } = req.body;
-      const perm = permission === 'WRITE' ? 'WRITE' : 'READ';
-      const share = await kanbanService.updateBoardShare(boardId, targetUserId, perm, userId);
+      const { permission, canManage } = req.body ?? {};
+      const share = await kanbanService.updateBoardShare(
+        boardId,
+        targetUserId,
+        {
+          permission: permission === 'WRITE' || permission === 'READ' ? permission : undefined,
+          canManage: typeof canManage === 'boolean' ? canManage : undefined,
+        },
+        userId,
+      );
       res.json({ success: true, data: share });
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : '';
