@@ -2618,3 +2618,8 @@ tr.orc-lista-row-enter > td {
     animation: none;
   }
 }
+
+/* Gráficos: sem o quadrado claro (padrão do Recharts) atrás da barra sob o mouse. */
+.recharts-rectangle.recharts-tooltip-cursor[fill="#ccc"] {
+  fill: transparent;
+}
